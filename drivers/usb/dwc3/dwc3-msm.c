@@ -2511,6 +2511,18 @@ static int dwc3_msm_probe(struct platform_device *pdev)
 				 &mdwc->qdss_tx_fifo_size))
 		dev_err(&pdev->dev,
 			"unable to read platform data qdss tx fifo size\n");
+			
+		if (!of_property_read_u32(node, "qcom,dwc-usb3-msm-adc-low-threshold",
+					&adc_low_threshold)) {
+		dev_info(&pdev->dev,
+			"Read platform data for adc low threshold\n");
+	}
+
+	if (!of_property_read_u32(node, "qcom,dwc-usb3-msm-adc-high-threshold",
+					&adc_high_threshold)) {
+		dev_info(&pdev->dev,
+			"Read platform data for adc high threshold\n");
+	}		
 
 	dwc3_set_notifier(&dwc3_msm_notify_event);
 	/* usb_psy required only for vbus_notifications or charging support */
