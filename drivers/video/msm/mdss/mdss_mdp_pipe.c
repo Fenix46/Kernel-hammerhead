@@ -1325,6 +1325,7 @@ static int mdss_mdp_format_setup(struct mdss_mdp_pipe *pipe)
 			(fmt->unpack_align_msb << 18) |
 			((fmt->bpp - 1) << 9);
 
+	opmode |= MDSS_MDP_OP_FLIP_UD;
 	mdss_mdp_pipe_sspp_setup(pipe, &opmode);
 
 	if (fmt->tile && mdata->highest_bank_bit) {
