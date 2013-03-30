@@ -557,6 +557,13 @@ config HAPTIC_ISA1200
 	help
 	  The ISA1200 is a high performance enhanced haptic driver.
 
+config MSM8974_PWM_VIBRATOR
+    bool "MSM8974 vibrator support"
+        depends on ANDROID_TIMED_OUTPUT
+        help
+          This option enables device driver support for MSM8974 Vibrator driver.
+          Some functions should be given by platform data for enable PWM, Motor IC, etc.
+
 config QSEECOM
 	tristate "Qualcomm Secure Execution Communicator driver"
 	help
