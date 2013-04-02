@@ -18,6 +18,7 @@
 #include <linux/usb/hcd.h>
 #include <linux/platform_device.h>
 #include <linux/regulator/consumer.h>
+#include <linux/slimport.h>
 
 #include "core.h"
 #include "dwc3_otg.h"
@@ -541,6 +542,9 @@ static int dwc3_otg_set_power(struct usb_phy *phy, unsigned mA)
 	if (dotg->charger->chg_type == DWC3_CDP_CHARGER)
 		mA = DWC3_IDEV_CHG_MAX;
 
+	if (slimport_is_connected())
+		mA = 500;
+
 	if (dotg->charger->max_power == mA)
 		return 0;
 
@@ -737,6 +741,10 @@ static void dwc3_otg_sm_work(struct work_struct *w)
 	case OTG_STATE_B_IDLE:
 		if (!test_bit(ID, &dotg->inputs)) {
 			dev_dbg(phy->dev, "!id\n");
+			if (slimport_is_connected()) {
+				work = 1;
+				break;
+			}
 			phy->state = OTG_STATE_A_IDLE;
 			work = 1;
 			dotg->charger_retry_count = 0;
@@ -769,10 +777,14 @@ static void dwc3_otg_sm_work(struct work_struct *w)
 					work = 1;
 					break;
 				case DWC3_SDP_CHARGER:
-					dwc3_otg_start_peripheral(&dotg->otg,
-									1);
-					phy->state = OTG_STATE_B_PERIPHERAL;
-					work = 1;
+					if (!slimport_is_connected()) {
+						dwc3_otg_start_peripheral(
+								&dotg->otg,
+								1);
+						phy->state =
+							OTG_STATE_B_PERIPHERAL;
+						work = 1;
+					}
 					break;
 				case DWC3_FLOATED_CHARGER:
 					if (dotg->charger_retry_count <
