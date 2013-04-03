@@ -1261,6 +1261,7 @@ static int qpnp_pon_probe(struct spmi_device *spmi)
 	int rc, sys_reset, index;
 	u8 pon_sts = 0, buf[2];
 	u16 poff_sts = 0;
+	int disable = 0;
 
 	pon = devm_kzalloc(&spmi->dev, sizeof(struct qpnp_pon),
 							GFP_KERNEL);
@@ -1281,8 +1282,12 @@ static int qpnp_pon_probe(struct spmi_device *spmi)
 	pon->spmi = spmi;
 
 	/* get the total number of pon configurations */
-	while ((itr = of_get_next_child(spmi->dev.of_node, itr)))
+	while ((itr = of_get_next_child(spmi->dev.of_node, itr))) {
+		rc = of_property_read_u32(itr, "qcom,disable", &disable);
+		if (!rc && disable)
+			continue;
 		pon->num_pon_config++;
+	}
 
 	if (!pon->num_pon_config) {
 		/* No PON config., do not register the driver */
