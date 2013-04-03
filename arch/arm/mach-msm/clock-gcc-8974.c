@@ -2535,6 +2535,7 @@ static struct clk_lookup msm_clocks_gcc_8974[] = {
 	CLK_LOOKUP("cam_gp1_clk", camss_gp1_clk.c, "vibrator"),
 #endif
 	CLK_LOOKUP_OF("wcnss_debug", wcnss_m_clk, "fb000000.qcom,wcnss-wlan"),
+ 	CLK_LOOKUP_OF("xo",         cxo_d1_pin.c,                 "bcm2079x"),
 
 };
 
@@ -2685,6 +2686,7 @@ static int msm_gcc_8974_probe(struct platform_device *pdev)
 	 */
 	clk_prepare_enable(&gcc_mmss_noc_cfg_ahb_clk.c);
 	clk_prepare_enable(&gcc_ocmem_noc_cfg_ahb_clk.c);
+ 	clk_prepare_enable(&cxo_d1_pin.c);
 
 	/* Set rates for single-rate clocks. */
 	clk_set_rate(&usb30_master_clk_src.c,
