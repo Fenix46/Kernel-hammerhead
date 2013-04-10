@@ -130,6 +130,129 @@ static int32_t msm_sensor_get_dt_data(struct device_node *of_node,
 		goto FREE_SENSORDATA;
 	}
 
+	if (of_property_read_bool(of_node, "qcom,gpio-vana") == true) {
+		rc = of_property_read_u32(of_node, "qcom,gpio-vana", &val);
+		if (rc < 0) {
+			pr_err("%s:%d read qcom,gpio-vana failed rc %d\n",
+				__func__, __LINE__, rc);
+			goto ERROR;
+		} else if (val >= gpio_array_size) {
+			pr_err("%s:%d qcom,gpio-vana invalid %d\n",
+				__func__, __LINE__, val);
+			goto ERROR;
+		}
+		gconf->gpio_num_info->gpio_num[SENSOR_GPIO_VANA] =
+			gpio_array[val];
+		CDBG("%s qcom,gpio-vana %d\n", __func__,
+			gconf->gpio_num_info->gpio_num[SENSOR_GPIO_VANA]);
+	}
+
+	if (of_property_read_bool(of_node, "qcom,gpio-vdig") == true) {
+			rc = of_property_read_u32(of_node, "qcom,gpio-vdig", &val);
+			if (rc < 0) {
+				pr_err("%s:%d read qcom,gpio-vdig failed rc %d\n",
+					__func__, __LINE__, rc);
+				goto ERROR;
+			} else if (val >= gpio_array_size) {
+				pr_err("%s:%d qcom,gpio-vdig invalid %d\n",
+					__func__, __LINE__, val);
+				goto ERROR;
+			}
+			gconf->gpio_num_info->gpio_num[SENSOR_GPIO_VDIG] =
+				gpio_array[val];
+			CDBG("%s qcom,gpio-vdig %d\n", __func__,
+				gconf->gpio_num_info->gpio_num[SENSOR_GPIO_VDIG]);
+	}
+
+	if (of_property_read_bool(of_node, "qcom,gpio-vio") == true) {
+			rc = of_property_read_u32(of_node, "qcom,gpio-vio", &val);
+			if (rc < 0) {
+				pr_err("%s:%d read qcom,gpio-vio failed rc %d\n",
+					__func__, __LINE__, rc);
+				goto ERROR;
+			} else if (val >= gpio_array_size) {
+				pr_err("%s:%d qcom,gpio-vio invalid %d\n",
+					__func__, __LINE__, val);
+				goto ERROR;
+			}
+			gconf->gpio_num_info->gpio_num[SENSOR_GPIO_VIO] =
+				gpio_array[val];
+			CDBG("%s qcom,gpio-vio %d\n", __func__,
+				gconf->gpio_num_info->gpio_num[SENSOR_GPIO_VIO]);
+	}
+
+	if (of_property_read_bool(of_node, "qcom,gpio-vcm") == true) {
+			rc = of_property_read_u32(of_node, "qcom,gpio-vcm", &val);
+			if (rc < 0) {
+				pr_err("%s:%d read qcom,gpio-vcm failed rc %d\n",
+					__func__, __LINE__, rc);
+				goto ERROR;
+			} else if (val >= gpio_array_size) {
+				pr_err("%s:%d qcom,gpio-vcm invalid %d\n",
+					__func__, __LINE__, val);
+				goto ERROR;
+			}
+			gconf->gpio_num_info->gpio_num[SENSOR_GPIO_VCM] =
+				gpio_array[val];
+			CDBG("%s qcom,gpio-vcm %d\n", __func__,
+				gconf->gpio_num_info->gpio_num[SENSOR_GPIO_VCM]);
+	}
+
+	if (of_property_read_bool(of_node, "qcom,gpio-standby") == true) {
+		rc = of_property_read_u32(of_node, "qcom,gpio-standby", &val);
+		if (rc < 0) {
+			pr_err("%s:%d read qcom,gpio-standby failed rc %d\n",
+				__func__, __LINE__, rc);
+			goto ERROR;
+		} else if (val >= gpio_array_size) {
+			pr_err("%s:%d qcom,gpio-standby invalid %d\n",
+				__func__, __LINE__, val);
+			goto ERROR;
+		}
+		gconf->gpio_num_info->gpio_num[SENSOR_GPIO_STANDBY] =
+			gpio_array[val];
+		CDBG("%s qcom,gpio-reset %d\n", __func__,
+			gconf->gpio_num_info->gpio_num[SENSOR_GPIO_STANDBY]);
+	}
+	return rc;
+
+ERROR:
+	kfree(gconf->gpio_num_info);
+	gconf->gpio_num_info = NULL;
+	return rc;
+}
+
+static int32_t msm_sensor_get_dt_actuator_data(struct device_node *of_node,
+	struct  msm_camera_sensor_board_info *sensordata)
+{
+	int32_t rc = 0;
+	uint32_t val = 0;
+
+	rc = of_property_read_u32(of_node, "qcom,actuator-cam-name", &val);
+	CDBG("%s qcom,actuator-cam-name %d, rc %d\n", __func__, val, rc);
+	if (rc < 0)
+		return 0;
+
+	sensordata->actuator_info = kzalloc(sizeof(struct msm_actuator_info),
+		GFP_KERNEL);
+	if (!sensordata->actuator_info) {
+		pr_err("%s failed %d\n", __func__, __LINE__);
+		rc = -ENOMEM;
+		goto ERROR;
+	}
+
+	sensordata->actuator_info->cam_name = val;
+
+	rc = of_property_read_u32(of_node, "qcom,actuator-vcm-pwd", &val);
+	CDBG("%s qcom,actuator-vcm-pwd %d, rc %d\n", __func__, val, rc);
+	if (!rc)
+		sensordata->actuator_info->vcm_pwd = val;
+
+	rc = of_property_read_u32(of_node, "qcom,actuator-vcm-enable", &val);
+	CDBG("%s qcom,actuator-vcm-enable %d, rc %d\n", __func__, val, rc);
+	if (!rc)
+		sensordata->actuator_info->vcm_enable = val;
+
 	rc = of_property_read_u32(of_node, "qcom,cci-master",
 		&s_ctrl->cci_i2c_master);
 	CDBG("%s qcom,cci-master %d, rc %d\n", __func__, s_ctrl->cci_i2c_master,
