@@ -440,17 +440,6 @@ int mdss_mdp_smp_setup(struct mdss_data_type *mdata, u32 cnt, u32 size)
 	return 0;
 }
 
-int mdss_mdp_smp_setup(struct mdss_data_type *mdata, u32 cnt, u32 size)
-{
-	if (!mdata)
-		return -EINVAL;
-
-	mdata->smp_mb_cnt = cnt;
-	mdata->smp_mb_size = size;
-
-	return 0;
-}
-
 /**
  * mdss_mdp_smp_handoff() - Handoff SMP MMBs in use by staged pipes
  * @mdata: pointer to the global mdss data structure.
