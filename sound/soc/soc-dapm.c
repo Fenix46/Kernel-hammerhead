@@ -2696,6 +2696,7 @@ int snd_soc_dapm_put_volsw(struct snd_kcontrol *kcontrol,
 	unsigned int val;
 	int connect, change;
 	struct snd_soc_dapm_update update;
+	int ret = 0;
 	int wi;
 
 	if (snd_soc_volsw_is_stereo(mc))
@@ -2727,13 +2728,17 @@ int snd_soc_dapm_put_volsw(struct snd_kcontrol *kcontrol,
 			update.val = val;
 			widget->dapm->update = &update;
 
-			soc_dapm_mixer_update_power(widget, kcontrol, connect);
+			ret = soc_dapm_mixer_update_power(widget, kcontrol, connect);
 
 			widget->dapm->update = NULL;
 		}
 	}
 
 	mutex_unlock(&card->dapm_mutex);
+	
+	if (ret > 0)
+        soc_dpcm_runtime_update(widget);
+	
 	return 0;
 }
 EXPORT_SYMBOL_GPL(snd_soc_dapm_put_volsw);
@@ -2785,6 +2790,7 @@ int snd_soc_dapm_put_enum_double(struct snd_kcontrol *kcontrol,
 	unsigned int val, mux, change;
 	unsigned int mask;
 	struct snd_soc_dapm_update update;
+	int ret = 0;
 	int wi;
 
 	if (ucontrol->value.enumerated.item[0] > e->max - 1)
@@ -2815,13 +2821,17 @@ int snd_soc_dapm_put_enum_double(struct snd_kcontrol *kcontrol,
 			update.val = val;
 			widget->dapm->update = &update;
 
-			soc_dapm_mux_update_power(widget, kcontrol, mux, e);
+			ret = soc_dapm_mux_update_power(widget, kcontrol, mux, e);
 
 			widget->dapm->update = NULL;
 		}
 	}
 
 	mutex_unlock(&card->dapm_mutex);
+	
+	if (ret > 0)
+        soc_dpcm_runtime_update(widget);
+	
 	return change;
 }
 EXPORT_SYMBOL_GPL(snd_soc_dapm_put_enum_double);
@@ -2877,11 +2887,15 @@ int snd_soc_dapm_put_enum_virt(struct snd_kcontrol *kcontrol,
 
 			widget->value = ucontrol->value.enumerated.item[0];
 
-			soc_dapm_mux_update_power(widget, kcontrol, widget->value, e);
+			 ret = soc_dapm_mux_update_power(widget, kcontrol, widget->value, e);
 		}
 	}
 
 	mutex_unlock(&card->dapm_mutex);
+	
+	if (ret > 0)
+        soc_dpcm_runtime_update(widget);
+	
 	return ret;
 }
 EXPORT_SYMBOL_GPL(snd_soc_dapm_put_enum_virt);
@@ -2952,6 +2966,7 @@ int snd_soc_dapm_put_value_enum_double(struct snd_kcontrol *kcontrol,
 	unsigned int mask;
 	struct snd_soc_dapm_update update;
 	int wi;
+	int ret = 0;
 
 	if (ucontrol->value.enumerated.item[0] > e->max - 1)
 		return -EINVAL;
@@ -2981,13 +2996,17 @@ int snd_soc_dapm_put_value_enum_double(struct snd_kcontrol *kcontrol,
 			update.val = val;
 			widget->dapm->update = &update;
 
-			soc_dapm_mux_update_power(widget, kcontrol, mux, e);
+			ret = soc_dapm_mux_update_power(widget, kcontrol, mux, e);
 
 			widget->dapm->update = NULL;
 		}
 	}
 
 	mutex_unlock(&card->dapm_mutex);
+	
+	if (ret > 0)
+        soc_dpcm_runtime_update(widget);
+	
 	return change;
 }
 EXPORT_SYMBOL_GPL(snd_soc_dapm_put_value_enum_double);
