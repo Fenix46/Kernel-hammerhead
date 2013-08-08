@@ -1546,6 +1546,9 @@ u32 hdmi_edid_get_sink_mode(void *input)
 		return 0;
 	}
 
+	if (is_slimport_dp())
+		return 1;
+	else
 		return edid_ctrl->sink_mode;
 } /* hdmi_edid_get_sink_mode */
 
