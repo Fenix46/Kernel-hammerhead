@@ -2172,6 +2172,25 @@ static int hdmi_tx_get_cable_status(struct platform_device *pdev, u32 vote)
 	return hpd;
 }
 
+int msm_hdmi_register_sp(struct platform_device *pdev,
+			 struct msm_hdmi_sp_ops *ops)
+{
+	struct hdmi_tx_ctrl *hdmi_ctrl = platform_get_drvdata(pdev);
+
+	if (!hdmi_ctrl) {
+		DEV_ERR("%s: invalid pdev\n", __func__);
+		return -ENODEV;
+	}
+
+	if (!ops) {
+		DEV_ERR("%s: invalid ops\n", __func__);
+		return -EINVAL;
+	}
+	ops->set_upstream_hpd = hdmi_tx_set_mhl_hpd;
+
+	return 0;
+}
+
 int msm_hdmi_register_audio_codec(struct platform_device *pdev,
 	struct msm_hdmi_audio_codec_ops *ops)
 {
