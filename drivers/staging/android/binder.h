@@ -20,11 +20,15 @@
 #ifndef _LINUX_BINDER_H
 #define _LINUX_BINDER_H
 
-#ifdef CONFIG_COMPAT
-#include <linux/compat.h>
+#ifdef CONFIG_ANDROID_BINDER_IPC_32BIT
+#define BINDER_IPC_32BIT 1
 #endif
 
 #include "uapi/binder.h"
+
+#ifdef CONFIG_COMPAT
+#include <linux/compat.h>
+#endif
 
 /* Support for 32bit userspace on a 64bit system */
 #ifdef CONFIG_COMPAT
