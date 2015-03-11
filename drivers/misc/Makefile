@@ -68,3 +68,4 @@ obj-$(CONFIG_EARJACK_DEBUGGER) += earjack_debugger.o
 obj-$(CONFIG_FAN48632_BOOST) += fan48632_boost.o
 obj-y				+= qcom/
 obj-$(CONFIG_MSM_PWM_VIBRATOR) += msm_pwm_vibrator.o
+obj-$(CONFIG_UID_CPUTIME) += uid_cputime.o
