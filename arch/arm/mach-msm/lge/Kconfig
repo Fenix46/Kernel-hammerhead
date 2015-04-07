@@ -3,6 +3,13 @@ config MACH_LGE
 
 menu "LGE Board Selection"
 
+config MACH_MSM8974_HAMMERHEAD
+	depends on ARCH_MSM8974
+	select MACH_LGE
+	bool "MSM8974 HAMMERHEAD"
+	help
+	  Support for the LGE MSM8974 HAMMERHEAD.
+
 config MACH_DORY
 	depends on ARCH_MSM8226
 	select MACH_LGE

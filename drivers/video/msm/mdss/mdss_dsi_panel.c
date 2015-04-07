@@ -28,6 +28,10 @@
 
 DEFINE_LED_TRIGGER(bl_led_trigger);
 
+#if defined(CONFIG_BACKLIGHT_LM3630) && defined(CONFIG_MACH_LGE)
+extern void lm3630_lcd_backlight_set_level(int level);
+#endif
+
 void mdss_dsi_panel_pwm_cfg(struct mdss_dsi_ctrl_pdata *ctrl)
 {
 	ctrl->pwm_bl = pwm_request(ctrl->pwm_lpg_chan, "lcd-bklt");
@@ -270,7 +274,10 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 {
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
 	struct mdss_panel_info *pinfo = NULL;
-	int i, rc = 0;
+	int rc = 0;
+#ifndef CONFIG_MACH_LGE
+	int i;
+#endif
 
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
@@ -303,14 +310,22 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 		if (!pinfo->panel_power_on) {
 			if (gpio_is_valid(ctrl_pdata->disp_en_gpio))
 				gpio_set_value((ctrl_pdata->disp_en_gpio), 1);
-
+#ifdef CONFIG_MACH_LGE
+			usleep(20 * 1000);
+			gpio_set_value((ctrl_pdata->rst_gpio), 1);
+			usleep(15 * 1000);
+			gpio_set_value((ctrl_pdata->rst_gpio), 0);
+			udelay(20);
+			gpio_set_value((ctrl_pdata->rst_gpio), 1);
+			usleep(10 * 1000);
+#else
 			for (i = 0; i < pdata->panel_info.rst_seq_len; ++i) {
 				gpio_set_value((ctrl_pdata->rst_gpio),
 					pdata->panel_info.rst_seq[i]);
 				if (pdata->panel_info.rst_seq[++i])
 					usleep(pinfo->rst_seq[i] * 1000);
 			}
-
+#endif
 			if (gpio_is_valid(ctrl_pdata->bklt_en_gpio))
 				gpio_set_value((ctrl_pdata->bklt_en_gpio), 1);
 		}
@@ -336,10 +351,15 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 			gpio_set_value((ctrl_pdata->disp_en_gpio), 0);
 			gpio_free(ctrl_pdata->disp_en_gpio);
 		}
+#ifdef CONFIG_MACH_LGE
+		usleep(20 * 1000);
+#endif
 		gpio_set_value((ctrl_pdata->rst_gpio), 0);
 		gpio_free(ctrl_pdata->rst_gpio);
+#ifndef CONFIG_MACH_LGE
 		if (gpio_is_valid(ctrl_pdata->mode_gpio))
 			gpio_free(ctrl_pdata->mode_gpio);
+#endif
 	}
 	return rc;
 }
@@ -423,7 +443,11 @@ static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 
 	switch (ctrl_pdata->bklt_ctrl) {
 	case BL_WLED:
+#if defined(CONFIG_BACKLIGHT_LM3630) && defined(CONFIG_MACH_LGE)
+		lm3630_lcd_backlight_set_level(bl_level);
+#else
 		led_trigger_event(bl_led_trigger, bl_level);
+#endif
 		break;
 	case BL_PWM:
 		mdss_dsi_panel_bklt_pwm(ctrl_pdata, bl_level);
