@@ -106,7 +106,7 @@ do { \
 #define SET_TLBIALLNSNH(b, v)    SET_GLOBAL_REG(TLBIALLNSNH, (b), (v))
 #define SET_TLBIALLH(b, v)       SET_GLOBAL_REG(TLBIALLH, (b), (v))
 #define SET_TLBGSYNC(b, v)       SET_GLOBAL_REG(TLBGSYNC, (b), (v))
-#define SET_TLBGSTATUS(b, v)     SET_GLOBAL_REG(TLBSTATUS, (b), (v))
+#define SET_TLBGSTATUS(b, v)     SET_GLOBAL_REG(TLBGSTATUS, (b), (v))
 #define SET_TLBIVAH(b, v)        SET_GLOBAL_REG(TLBIVAH, (b), (v))
 #define SET_GATS1UR(b, v)        SET_GLOBAL_REG(GATS1UR, (b), (v))
 #define SET_GATS1UW(b, v)        SET_GLOBAL_REG(GATS1UW, (b), (v))
@@ -145,7 +145,7 @@ do { \
 #define GET_TLBIALLNSNH(b)       GET_GLOBAL_REG(TLBIALLNSNH, (b))
 #define GET_TLBIALLH(b)          GET_GLOBAL_REG(TLBIALLH, (b))
 #define GET_TLBGSYNC(b)          GET_GLOBAL_REG(TLBGSYNC, (b))
-#define GET_TLBGSTATUS(b)        GET_GLOBAL_REG(TLBSTATUS, (b))
+#define GET_TLBGSTATUS(b)        GET_GLOBAL_REG(TLBGSTATUS, (b))
 #define GET_TLBIVAH(b)           GET_GLOBAL_REG(TLBIVAH, (b))
 #define GET_GATS1UR(b)           GET_GLOBAL_REG(GATS1UR, (b))
 #define GET_GATS1UW(b)           GET_GLOBAL_REG(GATS1UW, (b))
@@ -276,6 +276,20 @@ do { \
 #define SET_NSCR0_GFRE(b, v)       SET_GLOBAL_FIELD(b, NSCR0, GFRE, v)
 #define SET_CR0_CLIENTPD(b, v)     SET_GLOBAL_FIELD(b, CR0, CLIENTPD, v)
 #define SET_NSCR0_CLIENTPD(b, v)   SET_GLOBAL_FIELD(b, NSCR0, CLIENTPD, v)
+
+#define SET_ACR_SMTNMC_BPTLBEN(b, v)\
+	SET_GLOBAL_FIELD(b, ACR, SMTNMC_BPTLBEN, v)
+#define SET_ACR_MMUDIS_BPTLBEN(b, v)\
+	SET_GLOBAL_FIELD(b, ACR, MMUDIS_BPTLBEN, v)
+#define SET_ACR_S2CR_BPTLBEN(b, v)\
+	SET_GLOBAL_FIELD(b, ACR, S2CR_BPTLBEN, v)
+
+#define SET_NSACR_SMTNMC_BPTLBEN(b, v)\
+	SET_GLOBAL_FIELD(b, NSACR, SMTNMC_BPTLBEN, v)
+#define SET_NSACR_MMUDIS_BPTLBEN(b, v)\
+	SET_GLOBAL_FIELD(b, NSACR, MMUDIS_BPTLBEN, v)
+#define SET_NSACR_S2CR_BPTLBEN(b, v)\
+	SET_GLOBAL_FIELD(b, NSACR, S2CR_BPTLBEN, v)
 
 #define GET_CR0_NSCFG(b)           GET_GLOBAL_FIELD(b, CR0, NSCFG)
 #define GET_CR0_WACFG(b)           GET_GLOBAL_FIELD(b, CR0, WACFG)
@@ -1541,6 +1555,16 @@ do { \
 #define CR0_CLIENTPD_MASK       0x01
 #define NSCR0_CLIENTPD_MASK     0x01
 
+/* ACR */
+#define ACR_SMTNMC_BPTLBEN_MASK   0x01
+#define ACR_MMUDIS_BPTLBEN_MASK   0x01
+#define ACR_S2CR_BPTLBEN_MASK     0x01
+
+/* NSACR */
+#define NSACR_SMTNMC_BPTLBEN_MASK   0x01
+#define NSACR_MMUDIS_BPTLBEN_MASK   0x01
+#define NSACR_S2CR_BPTLBEN_MASK     0x01
+
 /* Configuration Register 2 */
 #define CR2_BPVMID_MASK         0xFF
 
@@ -1927,6 +1951,16 @@ do { \
 #define NSCR0_GFRE_SHIFT           1
 #define CR0_CLIENTPD_SHIFT         0
 #define NSCR0_CLIENTPD_SHIFT       0
+
+/* ACR */
+#define ACR_SMTNMC_BPTLBEN_SHIFT   8
+#define ACR_MMUDIS_BPTLBEN_SHIFT   9
+#define ACR_S2CR_BPTLBEN_SHIFT     10
+
+/* NSACR */
+#define NSACR_SMTNMC_BPTLBEN_SHIFT   8
+#define NSACR_MMUDIS_BPTLBEN_SHIFT   9
+#define NSACR_S2CR_BPTLBEN_SHIFT     10
 
 /* Configuration Register: CR2 */
 #define CR2_BPVMID_SHIFT           0

@@ -1,4 +1,4 @@
-/* Copyright (c) 2012, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -11,10 +11,11 @@
  *
  */
 
-#include "kgsl.h"
-#include "adreno.h"
+#include <linux/module.h>
+
+#include <linux/devfreq.h>
 
 /* Instantiate tracepoints */
 #define CREATE_TRACE_POINTS
-#include "a3xx_reg.h"
-#include "adreno_a3xx_trace.h"
+#include "devfreq_trace.h"
+
