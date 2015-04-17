@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -50,6 +50,8 @@
 #define RMB_PMI_CODE_START		0x14
 #define RMB_PMI_CODE_LENGTH		0x18
 
+#define MAX_VDD_MX_UV			1150000
+
 #define POLL_INTERVAL_US		50
 
 #define CMD_META_DATA_READY		0x1
@@ -69,15 +71,16 @@ module_param(pbl_mba_boot_timeout_ms, int, S_IRUGO | S_IWUSR);
 static int modem_auth_timeout_ms = 10000;
 module_param(modem_auth_timeout_ms, int, S_IRUGO | S_IWUSR);
 
-static int pil_mss_power_up(struct q6v5_data *drv)
+static int pil_msa_pbl_power_up(struct q6v5_data *drv)
 {
 	int ret = 0;
+	struct device *dev = drv->desc.dev;
 	u32 regval;
 
 	if (drv->vreg) {
 		ret = regulator_enable(drv->vreg);
 		if (ret)
-			dev_err(drv->desc.dev, "Failed to enable modem regulator.\n");
+			dev_err(dev, "Failed to enable modem regulator.\n");
 	}
 
 	if (drv->cxrail_bhs) {
@@ -92,7 +95,7 @@ static int pil_mss_power_up(struct q6v5_data *drv)
 	return ret;
 }
 
-static int pil_mss_power_down(struct q6v5_data *drv)
+static int pil_msa_pbl_power_down(struct q6v5_data *drv)
 {
 	u32 regval;
 
@@ -108,7 +111,7 @@ static int pil_mss_power_down(struct q6v5_data *drv)
 	return 0;
 }
 
-static int pil_mss_enable_clks(struct q6v5_data *drv)
+static int pil_msa_pbl_enable_clks(struct q6v5_data *drv)
 {
 	int ret;
 
@@ -132,7 +135,7 @@ err_ahb_clk:
 	return ret;
 }
 
-static void pil_mss_disable_clks(struct q6v5_data *drv)
+static void pil_msa_pbl_disable_clks(struct q6v5_data *drv)
 {
 	clk_disable_unprepare(drv->rom_clk);
 	clk_disable_unprepare(drv->axi_clk);
@@ -173,108 +176,52 @@ static int pil_msa_wait_for_mba_ready(struct q6v5_data *drv)
 	return 0;
 }
 
-int pil_mss_shutdown(struct pil_desc *pil)
+static int pil_msa_pbl_shutdown(struct pil_desc *pil)
 {
 	struct q6v5_data *drv = container_of(pil, struct q6v5_data, desc);
 
-	if (drv->axi_halt_base) {
-		pil_q6v5_halt_axi_port(pil,
-			drv->axi_halt_base + MSS_Q6_HALT_BASE);
-		pil_q6v5_halt_axi_port(pil,
-			drv->axi_halt_base + MSS_MODEM_HALT_BASE);
-		pil_q6v5_halt_axi_port(pil,
-			drv->axi_halt_base + MSS_NC_HALT_BASE);
-	}
+	pil_q6v5_halt_axi_port(pil, drv->axi_halt_base + MSS_Q6_HALT_BASE);
+	pil_q6v5_halt_axi_port(pil, drv->axi_halt_base + MSS_MODEM_HALT_BASE);
+	pil_q6v5_halt_axi_port(pil, drv->axi_halt_base + MSS_NC_HALT_BASE);
 
-	if (drv->restart_reg)
-		writel_relaxed(1, drv->restart_reg);
+	writel_relaxed(1, drv->restart_reg);
 
 	if (drv->is_booted) {
-		pil_mss_disable_clks(drv);
-		pil_mss_power_down(drv);
+		pil_msa_pbl_disable_clks(drv);
+		pil_msa_pbl_power_down(drv);
 		drv->is_booted = false;
 	}
 
 	return 0;
 }
 
-int pil_mss_make_proxy_votes(struct pil_desc *pil)
-{
-	int ret;
-	struct q6v5_data *drv = container_of(pil, struct q6v5_data, desc);
-	int uv = 0;
-
-	ret = of_property_read_u32(pil->dev->of_node, "vdd_mx-uV", &uv);
-	if (ret) {
-		dev_err(pil->dev, "missing vdd_mx-uV property\n");
-		return ret;
-	}
-
-	ret = regulator_set_voltage(drv->vreg_mx, uv, INT_MAX);
-	if (ret) {
-		dev_err(pil->dev, "Failed to request vreg_mx voltage\n");
-		return ret;
-	}
-
-	ret = regulator_enable(drv->vreg_mx);
-	if (ret) {
-		dev_err(pil->dev, "Failed to enable vreg_mx\n");
-		regulator_set_voltage(drv->vreg_mx, 0, INT_MAX);
-		return ret;
-	}
-
-	ret = pil_q6v5_make_proxy_votes(pil);
-	if (ret) {
-		regulator_disable(drv->vreg_mx);
-		regulator_set_voltage(drv->vreg_mx, 0, INT_MAX);
-	}
-
-	return ret;
-}
-
-void pil_mss_remove_proxy_votes(struct pil_desc *pil)
-{
-	struct q6v5_data *drv = container_of(pil, struct q6v5_data, desc);
-	pil_q6v5_remove_proxy_votes(pil);
-	regulator_disable(drv->vreg_mx);
-	regulator_set_voltage(drv->vreg_mx, 0, INT_MAX);
-}
-
-static int pil_mss_reset(struct pil_desc *pil)
+static int pil_msa_pbl_reset(struct pil_desc *pil)
 {
 	struct q6v5_data *drv = container_of(pil, struct q6v5_data, desc);
 	phys_addr_t start_addr = pil_get_entry_addr(pil);
 	int ret;
 
-	if (drv->mba_phys)
-		start_addr = drv->mba_phys;
-
 	/*
 	 * Bring subsystem out of reset and enable required
 	 * regulators and clocks.
 	 */
-	ret = pil_mss_power_up(drv);
+	ret = pil_msa_pbl_power_up(drv);
 	if (ret)
 		goto err_power;
 
 	/* Deassert reset to subsystem and wait for propagation */
-	if (drv->restart_reg) {
-		writel_relaxed(0, drv->restart_reg);
-		mb();
-		udelay(2);
-	}
+	writel_relaxed(0, drv->restart_reg);
+	mb();
+	udelay(2);
 
-	ret = pil_mss_enable_clks(drv);
+	ret = pil_msa_pbl_enable_clks(drv);
 	if (ret)
 		goto err_clks;
 
 	/* Program Image Address */
 	if (drv->self_auth) {
 		writel_relaxed(start_addr, drv->rmb_base + RMB_MBA_IMAGE);
-		/*
-		 * Ensure write to RMB base occurs before reset
-		 * is released.
-		 */
+		/* Ensure write to RMB base occurs before reset is released. */
 		mb();
 	} else {
 		writel_relaxed((start_addr >> 4) & 0x0FFFFFF0,
@@ -297,75 +244,60 @@ static int pil_mss_reset(struct pil_desc *pil)
 	return 0;
 
 err_q6v5_reset:
-	pil_mss_disable_clks(drv);
+	pil_msa_pbl_disable_clks(drv);
 err_clks:
-	if (drv->restart_reg)
-		writel_relaxed(1, drv->restart_reg);
-	pil_mss_power_down(drv);
+	writel_relaxed(1, drv->restart_reg);
+	pil_msa_pbl_power_down(drv);
 err_power:
 	return ret;
 }
 
-#define MBA_SIZE SZ_1M
-int pil_mss_reset_load_mba(struct pil_desc *pil)
+static int pil_msa_pbl_make_proxy_votes(struct pil_desc *pil)
 {
+	int ret;
 	struct q6v5_data *drv = container_of(pil, struct q6v5_data, desc);
-	const struct firmware *fw;
-	char fw_name_legacy[10] = "mba.b00";
-	char fw_name[10] = "mba.mbn";
-	char *fw_name_p;
-	void *mba_virt;
-	dma_addr_t mba_phys;
-	int ret, count;
-	const u8 *data;
 
-	fw_name_p = drv->non_elf_image ? fw_name_legacy : fw_name;
-	/* Load and authenticate mba image */
-	ret = request_firmware(&fw, fw_name_p, pil->dev);
+	ret = regulator_set_voltage(drv->vreg_mx, VDD_MSS_UV, MAX_VDD_MX_UV);
 	if (ret) {
-		dev_err(pil->dev, "Failed to locate %s\n",
-						fw_name_p);
+		dev_err(pil->dev, "Failed to request vreg_mx voltage\n");
 		return ret;
 	}
 
-	mba_virt = dma_alloc_coherent(pil->dev, MBA_SIZE, &mba_phys,
-					GFP_KERNEL);
-	if (!mba_virt) {
-		dev_err(pil->dev, "MBA metadata buffer allocation failed\n");
-		ret = -ENOMEM;
-		goto err_dma_alloc;
-	}
-
-	drv->mba_phys = mba_phys;
-	drv->mba_virt = mba_virt;
-
-	/* Load the MBA image into memory */
-	count = fw->size;
-	data = fw ? fw->data : NULL;
-	memcpy(mba_virt, data, count);
-	wmb();
-
-	ret = pil_mss_reset(pil);
+	ret = regulator_enable(drv->vreg_mx);
 	if (ret) {
-		dev_err(pil->dev, "MBA boot failed.\n");
-		goto err_mss_reset;
+		dev_err(pil->dev, "Failed to enable vreg_mx\n");
+		regulator_set_voltage(drv->vreg_mx, 0, MAX_VDD_MX_UV);
+		return ret;
 	}
 
-	release_firmware(fw);
+	ret = pil_q6v5_make_proxy_votes(pil);
+	if (ret) {
+		regulator_disable(drv->vreg_mx);
+		regulator_set_voltage(drv->vreg_mx, 0, MAX_VDD_MX_UV);
+	}
 
-	return 0;
-
-err_mss_reset:
-	dma_free_coherent(pil->dev, MBA_SIZE, drv->mba_virt, drv->mba_phys);
-err_dma_alloc:
-	release_firmware(fw);
 	return ret;
 }
 
-static int pil_msa_auth_modem_mdt(struct pil_desc *pil, const u8 *metadata,
-					size_t size)
+static void pil_msa_pbl_remove_proxy_votes(struct pil_desc *pil)
 {
-	struct modem_data *drv = dev_get_drvdata(pil->dev);
+	struct q6v5_data *drv = container_of(pil, struct q6v5_data, desc);
+	pil_q6v5_remove_proxy_votes(pil);
+	regulator_disable(drv->vreg_mx);
+	regulator_set_voltage(drv->vreg_mx, 0, MAX_VDD_MX_UV);
+}
+
+struct pil_reset_ops pil_msa_pbl_ops = {
+	.proxy_vote = pil_msa_pbl_make_proxy_votes,
+	.proxy_unvote = pil_msa_pbl_remove_proxy_votes,
+	.auth_and_reset = pil_msa_pbl_reset,
+	.shutdown = pil_msa_pbl_shutdown,
+};
+
+static int pil_msa_mba_init_image(struct pil_desc *pil,
+				  const u8 *metadata, size_t size)
+{
+	struct mba_data *drv = container_of(pil, struct mba_data, desc);
 	void *mdata_virt;
 	dma_addr_t mdata_phys;
 	s32 status;
@@ -400,25 +332,14 @@ static int pil_msa_auth_modem_mdt(struct pil_desc *pil, const u8 *metadata,
 	}
 
 	dma_free_coherent(pil->dev, size, mdata_virt, mdata_phys);
+
 	return ret;
-}
-
-static int pil_msa_mss_reset_mba_load_auth_mdt(struct pil_desc *pil,
-				  const u8 *metadata, size_t size)
-{
-	int ret;
-
-	ret = pil_mss_reset_load_mba(pil);
-	if (ret)
-		return ret;
-
-	return pil_msa_auth_modem_mdt(pil, metadata, size);
 }
 
 static int pil_msa_mba_verify_blob(struct pil_desc *pil, phys_addr_t phy_addr,
 				   size_t size)
 {
-	struct modem_data *drv = dev_get_drvdata(pil->dev);
+	struct mba_data *drv = container_of(pil, struct mba_data, desc);
 	s32 status;
 	u32 img_length = readl_relaxed(drv->rmb_base + RMB_PMI_CODE_LENGTH);
 
@@ -442,7 +363,7 @@ static int pil_msa_mba_verify_blob(struct pil_desc *pil, phys_addr_t phy_addr,
 
 static int pil_msa_mba_auth(struct pil_desc *pil)
 {
-	struct modem_data *drv = dev_get_drvdata(pil->dev);
+	struct mba_data *drv = container_of(pil, struct mba_data, desc);
 	int ret;
 	s32 status;
 
@@ -457,44 +378,11 @@ static int pil_msa_mba_auth(struct pil_desc *pil)
 		ret = -EINVAL;
 	}
 
-	if (drv->q6 && drv->q6->mba_virt)
-		/* Reclaim MBA memory. */
-		dma_free_coherent(pil->dev, MBA_SIZE, drv->q6->mba_virt,
-							drv->q6->mba_phys);
 	return ret;
 }
 
-/*
- * To be used only if self-auth is disabled, or if the
- * MBA image is loaded as segments and not in init_image.
- */
-struct pil_reset_ops pil_msa_mss_ops = {
-	.proxy_vote = pil_mss_make_proxy_votes,
-	.proxy_unvote = pil_mss_remove_proxy_votes,
-	.auth_and_reset = pil_mss_reset,
-	.shutdown = pil_mss_shutdown,
-};
-
-/*
- * To be used if self-auth is enabled and the MBA is to be loaded
- * in init_image and the modem headers are also to be authenticated
- * in init_image. Modem segments authenticated in auth_and_reset.
- */
-struct pil_reset_ops pil_msa_mss_ops_selfauth = {
-	.init_image = pil_msa_mss_reset_mba_load_auth_mdt,
-	.proxy_vote = pil_mss_make_proxy_votes,
-	.proxy_unvote = pil_mss_remove_proxy_votes,
-	.verify_blob = pil_msa_mba_verify_blob,
-	.auth_and_reset = pil_msa_mba_auth,
-	.shutdown = pil_mss_shutdown,
-};
-
-/*
- * To be used if the modem headers are to be authenticated
- * in init_image, and the modem segments in auth_and_reset.
- */
-struct pil_reset_ops pil_msa_femto_mba_ops = {
-	.init_image = pil_msa_auth_modem_mdt,
+struct pil_reset_ops pil_msa_mba_ops = {
+	.init_image = pil_msa_mba_init_image,
 	.verify_blob = pil_msa_mba_verify_blob,
 	.auth_and_reset = pil_msa_mba_auth,
 };
