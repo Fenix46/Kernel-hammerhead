@@ -569,9 +569,9 @@ static void pil_vote_load_worker(struct work_struct *work)
 	struct pil_vote_info *vote_info;
 
 	vote_info = container_of(work, struct pil_vote_info, load_work);
-	peripheral = smd_edge_to_pil_str(SMD_APPS_MODEM);
+	peripheral = smd_edge_to_subsystem(SMD_APPS_MODEM);
 
-	if (!IS_ERR_OR_NULL(peripheral) && !strcmp(peripheral, "modem")) {
+	if (peripheral && !strncmp(peripheral, "modem", 6)) {
 		vote_info->pil_handle = subsystem_get(peripheral);
 		if (IS_ERR(vote_info->pil_handle)) {
 			pr_err("%s: Failed to load %s\n",

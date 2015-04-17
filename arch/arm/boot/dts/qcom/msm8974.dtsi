@@ -1836,7 +1836,7 @@
 		vdd_mx-uV = <1050000>;
 		vdd_pll-supply = <&pm8941_l12>;
 		qcom,vdd_pll = <1800000>;
-		qcom,firmware-name = "modem";
+		qcom,firmware-name = "mba";
 		qcom,pil-self-auth;
 		qcom,mba-image-is-not-elf;
 
@@ -2233,6 +2233,11 @@
 		interrupts = <0 29 1>;
 		qcom,rx-ring-size = <64>;
 	};
+
+        memory_hole: qcom,msm-mem-hole {
+                compatible = "qcom,msm-mem-hole";
+                qcom,memblock-remove = <0x7b00000 0x8400000>; /* Address and Size of Hole */
+        };
 
 	uart7: uart@f995d000 { /*BLSP #2, UART #7 */
 		compatible = "qcom,msm-hsuart-v14";

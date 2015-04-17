@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -41,6 +41,18 @@
 #define MAX_SSR_REASON_LEN	81U
 #define STOP_ACK_TIMEOUT_MS	1000
 
+struct modem_data {
+	struct mba_data *mba;
+	struct q6v5_data *q6;
+	struct subsys_device *subsys;
+	struct subsys_desc subsys_desc;
+	void *adsp_state_notifier;
+	void *ramdump_dev;
+	bool crash_shutdown;
+	bool ignore_errors;
+	struct completion stop_ack;
+};
+
 #define subsys_to_drv(d) container_of(d, struct modem_data, subsys_desc)
 
 static void log_modem_sfr(void)
@@ -61,6 +73,10 @@ static void log_modem_sfr(void)
 
 	strlcpy(reason, smem_reason, min(size, MAX_SSR_REASON_LEN));
 	pr_err("modem subsystem failure reason: %s.\n", reason);
+
+#ifdef CONFIG_LGE_HANDLE_PANIC
+	lge_check_crash_skiped(reason);
+#endif
 
 	smem_reason[0] = '\0';
 	wmb();
@@ -112,25 +128,32 @@ static int modem_shutdown(const struct subsys_desc *subsys, bool force_stop)
 		gpio_set_value(subsys->force_stop_gpio, 0);
 	}
 
+	pil_shutdown(&drv->mba->desc);
 	pil_shutdown(&drv->q6->desc);
-
 	return 0;
 }
 
 static int modem_powerup(const struct subsys_desc *subsys)
 {
 	struct modem_data *drv = subsys_to_drv(subsys);
+	int ret;
 
 	if (subsys->is_not_loadable)
 		return 0;
 	/*
 	 * At this time, the modem is shutdown. Therefore this function cannot
-	 * run concurrently with the watchdog bite error handler, making it safe
-	 * to unset the flag below.
+	 * run concurrently with either the watchdog bite error handler or the
+	 * SMSM callback, making it safe to unset the flag below.
 	 */
 	INIT_COMPLETION(drv->stop_ack);
 	drv->ignore_errors = false;
-	return pil_boot(&drv->q6->desc);
+	ret = pil_boot(&drv->q6->desc);
+	if (ret)
+		return ret;
+	ret = pil_boot(&drv->mba->desc);
+	if (ret)
+		pil_shutdown(&drv->q6->desc);
+	return ret;
 }
 
 static void modem_crash_shutdown(const struct subsys_desc *subsys)
@@ -151,20 +174,15 @@ static int modem_ramdump(int enable, const struct subsys_desc *subsys)
 	if (!enable)
 		return 0;
 
-	ret = pil_mss_make_proxy_votes(&drv->q6->desc);
+	ret = pil_boot(&drv->q6->desc);
 	if (ret)
 		return ret;
 
-	ret = pil_mss_reset_load_mba(&drv->q6->desc);
-	if (ret)
-		return ret;
-
-	ret = pil_do_ramdump(&drv->q6->desc, drv->ramdump_dev);
+	ret = pil_do_ramdump(&drv->mba->desc, drv->ramdump_dev);
 	if (ret < 0)
 		pr_err("Unable to dump modem fw memory (rc = %d).\n", ret);
 
-	pil_mss_shutdown(&drv->q6->desc);
-	pil_mss_remove_proxy_votes(&drv->q6->desc);
+	pil_shutdown(&drv->q6->desc);
 	return ret;
 }
 
@@ -221,22 +239,27 @@ static int pil_mss_loadable_init(struct modem_data *drv,
 					struct platform_device *pdev)
 {
 	struct q6v5_data *q6;
-	struct pil_desc *q6_desc;
+	struct mba_data *mba;
+	struct pil_desc *q6_desc, *mba_desc;
 	struct resource *res;
 	struct property *prop;
 	int ret;
+
+	mba = devm_kzalloc(&pdev->dev, sizeof(*mba), GFP_KERNEL);
+	if (!mba)
+		return -ENOMEM;
+	drv->mba = mba;
 
 	q6 = pil_q6v5_init(pdev);
 	if (IS_ERR(q6))
 		return PTR_ERR(q6);
 	drv->q6 = q6;
-	drv->xo = q6->xo;
+	drv->mba->xo = q6->xo;
 
 	q6_desc = &q6->desc;
+	q6_desc->ops = &pil_msa_pbl_ops;
 	q6_desc->owner = THIS_MODULE;
 	q6_desc->proxy_timeout = PROXY_TIMEOUT_MS;
-
-	q6_desc->ops = &pil_msa_mss_ops;
 
 	q6->self_auth = of_property_read_bool(pdev->dev.of_node,
 							"qcom,pil-self-auth");
@@ -246,8 +269,7 @@ static int pil_mss_loadable_init(struct modem_data *drv,
 		q6->rmb_base = devm_request_and_ioremap(&pdev->dev, res);
 		if (!q6->rmb_base)
 			return -ENOMEM;
-		drv->rmb_base = q6->rmb_base;
-		q6_desc->ops = &pil_msa_mss_ops_selfauth;
+		mba->rmb_base = q6->rmb_base;
 	}
 
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "restart_reg");
@@ -278,11 +300,6 @@ static int pil_mss_loadable_init(struct modem_data *drv,
 	q6->vreg_mx = devm_regulator_get(&pdev->dev, "vdd_mx");
 	if (IS_ERR(q6->vreg_mx))
 		return PTR_ERR(q6->vreg_mx);
-	prop = of_find_property(pdev->dev.of_node, "vdd_mx-uV", NULL);
-	if (!prop) {
-		dev_err(&pdev->dev, "Missing vdd_mx-uV property\n");
-		return -EINVAL;
-	}
 
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
 		"cxrail_bhs_reg");
@@ -303,8 +320,25 @@ static int pil_mss_loadable_init(struct modem_data *drv,
 		return PTR_ERR(q6->rom_clk);
 
 	ret = pil_desc_init(q6_desc);
+	if (ret)
+		return ret;
 
+	mba_desc = &mba->desc;
+	mba_desc->name = "modem";
+	mba_desc->dev = &pdev->dev;
+	mba_desc->ops = &pil_msa_mba_ops;
+	mba_desc->owner = THIS_MODULE;
+
+	ret = pil_desc_init(mba_desc);
+	if (ret)
+		goto err_mba_desc;
+
+	return 0;
+
+err_mba_desc:
+	pil_desc_release(q6_desc);
 	return ret;
+
 }
 
 static int pil_mss_driver_probe(struct platform_device *pdev)
@@ -337,14 +371,13 @@ static int pil_mss_driver_exit(struct platform_device *pdev)
 
 	subsys_unregister(drv->subsys);
 	destroy_ramdump_device(drv->ramdump_dev);
+	pil_desc_release(&drv->mba->desc);
 	pil_desc_release(&drv->q6->desc);
 	return 0;
 }
 
 static struct of_device_id mss_match_table[] = {
 	{ .compatible = "qcom,pil-q6v5-mss" },
-	{ .compatible = "qcom,pil-q6v55-mss" },
-	{ .compatible = "qcom,pil-q6v56-mss" },
 	{}
 };
 
