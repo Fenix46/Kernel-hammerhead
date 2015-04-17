@@ -14,7 +14,6 @@
 #define __MDSS_HDMI_HDCP_H__
 
 #include "mdss_hdmi_util.h"
-#include <soc/qcom/scm.h>
 
 enum hdmi_hdcp_state {
 	HDCP_STATE_INACTIVE,

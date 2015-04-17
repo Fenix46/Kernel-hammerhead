@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -151,41 +151,6 @@ gpio_free:
 	gpio_free(edp_drv->gpio_panel_en);
 gpio_err:
 	return -ENODEV;
-}
-
-static int mdss_edp_gpio_lvl_en(struct mdss_edp_drv_pdata *edp_drv)
-{
-	int ret = 0;
-
-	edp_drv->gpio_lvl_en = of_get_named_gpio(edp_drv->pdev->dev.of_node,
-			"gpio-lvl-en", 0);
-	if (!gpio_is_valid(edp_drv->gpio_lvl_en)) {
-		pr_err("%s: gpio_lvl_en=%d not specified\n", __func__,
-				edp_drv->gpio_lvl_en);
-		ret = -ENODEV;
-		goto gpio_err;
-	}
-
-	ret = gpio_request(edp_drv->gpio_lvl_en, "lvl_enable");
-	if (ret) {
-		pr_err("%s: Request reset gpio_lvl_en failed, ret=%d\n",
-				__func__, ret);
-		return ret;
-	}
-
-	ret = gpio_direction_output(edp_drv->gpio_lvl_en, 1);
-	if (ret) {
-		pr_err("%s: Set direction for gpio_lvl_en failed, ret=%d\n",
-				__func__, ret);
-		goto gpio_free;
-	}
-
-	return ret;
-
-gpio_free:
-	gpio_free(edp_drv->gpio_lvl_en);
-gpio_err:
-	return ret;
 }
 
 static int mdss_edp_pwm_config(struct mdss_edp_drv_pdata *edp_drv)
@@ -613,8 +578,6 @@ int mdss_edp_on(struct mdss_panel_data *pdata)
 		mdss_edp_timing_cfg(edp_drv);
 
 		gpio_set_value(edp_drv->gpio_panel_en, 1);
-		if (gpio_is_valid(edp_drv->gpio_lvl_en))
-			gpio_set_value(edp_drv->gpio_lvl_en, 1);
 
 		INIT_COMPLETION(edp_drv->idle_comp);
 		mdss_edp_mainlink_ctrl(edp_drv, 1);
@@ -623,11 +586,6 @@ int mdss_edp_on(struct mdss_panel_data *pdata)
 	}
 
 	mdss_edp_irq_enable(edp_drv);
-
-	if (edp_drv->delay_link_train) {
-		mdss_edp_link_train(edp_drv);
-		edp_drv->delay_link_train = 0;
-	}
 
 	mdss_edp_wait4train(edp_drv);
 
@@ -668,8 +626,6 @@ int mdss_edp_off(struct mdss_panel_data *pdata)
 	mdss_edp_irq_disable(edp_drv);
 
 	gpio_set_value(edp_drv->gpio_panel_en, 0);
-	if (gpio_is_valid(edp_drv->gpio_lvl_en))
-		gpio_set_value(edp_drv->gpio_lvl_en, 0);
 	if (edp_drv->bl_pwm != NULL)
 		pwm_disable(edp_drv->bl_pwm);
 	edp_drv->is_pwm_enabled = 0;
@@ -764,8 +720,6 @@ static int mdss_edp_remove(struct platform_device *pdev)
 	edp_drv = platform_get_drvdata(pdev);
 
 	gpio_free(edp_drv->gpio_panel_en);
-	if (gpio_is_valid(edp_drv->gpio_lvl_en))
-		gpio_free(edp_drv->gpio_lvl_en);
 	mdss_edp_regulator_off(edp_drv);
 	iounmap(edp_drv->base);
 	iounmap(edp_drv->mmss_cc_base);
@@ -802,7 +756,7 @@ static int mdss_edp_device_register(struct mdss_edp_drv_pdata *edp_drv)
 		return ret;
 	}
 
-	pr_info("%s: eDP initialized\n", __func__);
+	pr_debug("%s: eDP initialized\n", __func__);
 
 	return 0;
 }
@@ -874,11 +828,6 @@ static void mdss_edp_do_link_train(struct mdss_edp_drv_pdata *ep)
 {
 	if (ep->cont_splash)
 		return;
-
-	if (!ep->inited) {
-		ep->delay_link_train++;
-		return;
-	}
 
 	mdss_edp_link_train(ep);
 }
@@ -1011,7 +960,7 @@ static void mdss_edp_irq_enable(struct mdss_edp_drv_pdata *edp_drv)
 	edp_write(edp_drv->base + 0x30c, edp_drv->mask2);
 	spin_unlock_irqrestore(&edp_drv->lock, flags);
 
-	edp_drv->mdss_util->enable_irq(&mdss_edp_hw);
+	mdss_enable_irq(&mdss_edp_hw);
 }
 
 static void mdss_edp_irq_disable(struct mdss_edp_drv_pdata *edp_drv)
@@ -1023,7 +972,7 @@ static void mdss_edp_irq_disable(struct mdss_edp_drv_pdata *edp_drv)
 	edp_write(edp_drv->base + 0x30c, 0x0);
 	spin_unlock_irqrestore(&edp_drv->lock, flags);
 
-	edp_drv->mdss_util->disable_irq(&mdss_edp_hw);
+	mdss_disable_irq(&mdss_edp_hw);
 }
 
 static int mdss_edp_irq_setup(struct mdss_edp_drv_pdata *edp_drv)
@@ -1070,7 +1019,7 @@ static int mdss_edp_irq_setup(struct mdss_edp_drv_pdata *edp_drv)
 
 	mdss_edp_hw.ptr = (void *)(edp_drv);
 
-	if (edp_drv->mdss_util->register_irq(&mdss_edp_hw))
+	if (mdss_register_irq(&mdss_edp_hw))
 		pr_err("%s: mdss_register_irq failed.\n", __func__);
 
 
@@ -1116,19 +1065,6 @@ static int mdss_edp_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 
-	edp_drv->mdss_util = mdss_get_util_intf();
-	if (edp_drv->mdss_util == NULL) {
-		pr_err("Failed to get mdss utility functions\n");
-		return -ENODEV;
-	}
-	edp_drv->panel_data.panel_info.is_prim_panel = true;
-
-	mdss_edp_hw.irq_info = mdss_intr_line();
-	if (mdss_edp_hw.irq_info == NULL) {
-		pr_err("Failed to get mdss irq information\n");
-		return -ENODEV;
-	}
-
 	edp_drv->pdev = pdev;
 	edp_drv->pdev->id = 1;
 	edp_drv->clk_on = 0;
@@ -1158,10 +1094,6 @@ static int mdss_edp_probe(struct platform_device *pdev)
 	if (ret)
 		goto edp_clk_deinit;
 
-	ret = mdss_edp_gpio_lvl_en(edp_drv);
-	if (ret)
-		pr_err("%s: No gpio_lvl_en detected\n", __func__);
-
 	ret = mdss_edp_pwm_config(edp_drv);
 	if (ret)
 		goto edp_free_gpio_panel_en;
@@ -1174,6 +1106,8 @@ static int mdss_edp_probe(struct platform_device *pdev)
 
 	edp_drv->cont_splash = of_property_read_bool(pdev->dev.of_node,
 			"qcom,cont-splash-enabled");
+
+	pr_debug("%s:cont_splash=%d\n", __func__, edp_drv->cont_splash);
 
 	/* only need aux and ahb clock for aux channel */
 	mdss_edp_prepare_aux_clocks(edp_drv);
@@ -1210,17 +1144,13 @@ static int mdss_edp_probe(struct platform_device *pdev)
 
 	mdss_edp_device_register(edp_drv);
 
-	edp_drv->inited = true;
-
-	pr_debug("%s: done\n", __func__);
+	pr_info("%s: done\n", __func__);
 
 	return 0;
 
 
 edp_free_gpio_panel_en:
 	gpio_free(edp_drv->gpio_panel_en);
-	if (gpio_is_valid(edp_drv->gpio_lvl_en))
-		gpio_free(edp_drv->gpio_lvl_en);
 edp_clk_deinit:
 	mdss_edp_clk_deinit(edp_drv);
 	mdss_edp_regulator_off(edp_drv);
