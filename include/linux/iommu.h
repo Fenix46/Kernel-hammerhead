@@ -25,11 +25,9 @@
 #include <linux/types.h>
 #include <linux/scatterlist.h>
 
-#define IOMMU_READ	(1 << 0)
-#define IOMMU_WRITE	(1 << 1)
-#define IOMMU_CACHE	(1 << 2) /* DMA cache coherency */
-#define IOMMU_EXEC	(1 << 3)
-#define IOMMU_PRIV	(16)
+#define IOMMU_READ	(1)
+#define IOMMU_WRITE	(2)
+#define IOMMU_CACHE	(4) /* DMA cache coherency */
 
 struct iommu_ops;
 struct iommu_group;
