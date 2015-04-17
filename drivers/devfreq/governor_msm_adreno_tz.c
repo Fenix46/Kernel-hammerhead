@@ -75,8 +75,15 @@ static int __secure_tz_reset_entry2(unsigned int *scm_data, u32 size_scm_data,
 					scm_data[1]);
 		spin_unlock(&tz_lock);
 	} else {
-		ret = scm_call(SCM_SVC_DCVS, TZ_RESET_ID_64, scm_data,
-			size_scm_data, NULL, 0);
+		if (is_scm_armv8()) {
+			struct scm_desc desc = {0};
+			desc.arginfo = 0;
+			ret = scm_call2(SCM_SIP_FNID(SCM_SVC_DCVS,
+					 TZ_RESET_ID_64), &desc);
+		} else {
+			ret = scm_call(SCM_SVC_DCVS, TZ_RESET_ID_64, scm_data,
+				size_scm_data, NULL, 0);
+		}
 	}
 	return ret;
 }
@@ -95,8 +102,19 @@ static int __secure_tz_update_entry3(unsigned int *scm_data, u32 size_scm_data,
 		spin_unlock(&tz_lock);
 		*val = ret;
 	} else {
-		ret = scm_call(SCM_SVC_DCVS, TZ_UPDATE_ID_64, scm_data,
-			size_scm_data, val, size_val);
+		if (is_scm_armv8()) {
+			struct scm_desc desc = {0};
+			desc.args[0] = scm_data[0];
+			desc.args[1] = scm_data[1];
+			desc.args[2] = scm_data[2];
+			desc.arginfo = SCM_ARGS(3);
+			ret = scm_call2(SCM_SIP_FNID(SCM_SVC_DCVS,
+					TZ_V2_UPDATE_ID_64), &desc);
+			*val = desc.ret[0];
+		} else {
+			ret = scm_call(SCM_SVC_DCVS, TZ_UPDATE_ID_64, scm_data,
+				size_scm_data, val, size_val);
+		}
 	}
 	return ret;
 }
@@ -115,12 +133,36 @@ static int tz_init(struct devfreq_msm_adreno_tz_data *priv,
 	} else if (scm_is_call_available(SCM_SVC_DCVS, TZ_INIT_ID_64) &&
 			scm_is_call_available(SCM_SVC_DCVS, TZ_UPDATE_ID_64) &&
 			scm_is_call_available(SCM_SVC_DCVS, TZ_RESET_ID_64)) {
-		ret = scm_call(SCM_SVC_DCVS, TZ_INIT_ID_64,
-			       tz_pwrlevels, size_pwrlevels,
-			       version, size_version);
+		struct scm_desc desc = {0};
+		unsigned int *tz_buf;
+
+		if (!is_scm_armv8()) {
+			ret = scm_call(SCM_SVC_DCVS, TZ_INIT_ID_64,
+				       tz_pwrlevels, size_pwrlevels,
+				       version, size_version);
+			if (!ret)
+				priv->is_64 = true;
+			return ret;
+		}
+
+		tz_buf = kzalloc(PAGE_ALIGN(size_pwrlevels), GFP_KERNEL);
+		if (!tz_buf)
+			return -ENOMEM;
+		memcpy(tz_buf, tz_pwrlevels, size_pwrlevels);
+		/* Ensure memcpy completes execution */
+		mb();
+		dmac_flush_range(tz_buf, tz_buf + PAGE_ALIGN(size_pwrlevels));
+
+		desc.args[0] = virt_to_phys(tz_buf);
+		desc.args[1] = size_pwrlevels;
+		desc.arginfo = SCM_ARGS(2, SCM_RW, SCM_VAL);
+
+		ret = scm_call2(SCM_SIP_FNID(SCM_SVC_DCVS, TZ_V2_INIT_ID_64),
+				&desc);
+		*version = desc.ret[0];
 		if (!ret)
 			priv->is_64 = true;
-		return ret;
+		kzfree(tz_buf);
 	} else
 		ret = -EINVAL;
 
