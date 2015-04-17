@@ -846,6 +846,41 @@ static inline int mdss_mdp_irq_clk_register(struct mdss_data_type *mdata,
 	return 0;
 }
 
+#define SEC_DEVICE_MDSS		1
+
+static void __mdss_restore_sec_cfg(struct mdss_data_type *mdata)
+{
+	int ret, scm_ret = 0;
+
+	pr_debug("restoring mdss secure config\n");
+
+	mdss_mdp_clk_update(MDSS_CLK_AHB, 1);
+	mdss_mdp_clk_update(MDSS_CLK_AXI, 1);
+	mdss_mdp_clk_update(MDSS_CLK_MDP_CORE, 1);
+
+	ret = scm_restore_sec_cfg(SEC_DEVICE_MDSS, 0, &scm_ret);
+	if (ret || scm_ret)
+		pr_warn("scm_restore_sec_cfg failed %d %d\n",
+				ret, scm_ret);
+
+	mdss_mdp_clk_update(MDSS_CLK_AHB, 0);
+	mdss_mdp_clk_update(MDSS_CLK_AXI, 0);
+	mdss_mdp_clk_update(MDSS_CLK_MDP_CORE, 0);
+}
+
+static int mdss_mdp_gdsc_notifier_call(struct notifier_block *self,
+		unsigned long event, void *data)
+{
+	struct mdss_data_type *mdata;
+
+	mdata = container_of(self, struct mdss_data_type, gdsc_cb);
+
+	if (event & REGULATOR_EVENT_ENABLE)
+		__mdss_restore_sec_cfg(mdata);
+
+	return NOTIFY_OK;
+}
+
 static int mdss_mdp_irq_clk_setup(struct mdss_data_type *mdata)
 {
 	int ret;
@@ -874,6 +909,11 @@ static int mdss_mdp_irq_clk_setup(struct mdss_data_type *mdata)
 		return -EINVAL;
 	}
 	mdata->fs_ena = false;
+
+	mdata->gdsc_cb.notifier_call = mdss_mdp_gdsc_notifier_call;
+	mdata->gdsc_cb.priority = 5;
+	if (regulator_register_notifier(mdata->fs, &(mdata->gdsc_cb)))
+		pr_warn("GDSC notification registration failed!\n");
 
 	mdata->vdd_cx = devm_regulator_get(&mdata->pdev->dev,
 				"vdd-cx");
@@ -1157,7 +1197,7 @@ static u32 mdss_mdp_res_init(struct mdss_data_type *mdata)
 	mdata->hist_intr.state = 0;
 	spin_lock_init(&mdata->hist_intr.lock);
 
-	mdata->iclient = msm_ion_client_create(-1, mdata->pdev->name);
+	mdata->iclient = msm_ion_client_create(mdata->pdev->name);
 	if (IS_ERR_OR_NULL(mdata->iclient)) {
 		pr_err("msm_ion_client_create() return error (%p)\n",
 				mdata->iclient);
@@ -2973,6 +3013,35 @@ static void mdss_mdp_footswitch_ctrl(struct mdss_data_type *mdata, int on)
 		}
 		mdata->fs_ena = false;
 	}
+}
+
+int mdss_mdp_secure_display_ctrl(unsigned int enable)
+{
+	struct sd_ctrl_req {
+		unsigned int enable;
+	} __attribute__ ((__packed__)) request;
+	unsigned int resp = -1;
+	int ret = 0;
+	struct scm_desc desc;
+
+	desc.args[0] = request.enable = enable;
+	desc.arginfo = SCM_ARGS(1);
+
+	if (!is_scm_armv8()) {
+		ret = scm_call(SCM_SVC_MP, MEM_PROTECT_SD_CTRL,
+			&request, sizeof(request), &resp, sizeof(resp));
+	} else {
+		ret = scm_call2(SCM_SIP_FNID(SCM_SVC_MP,
+				MEM_PROTECT_SD_CTRL_FLAT), &desc);
+		resp = desc.ret[0];
+	}
+
+	pr_debug("scm_call MEM_PROTECT_SD_CTRL(%u): ret=%d, resp=%x",
+				enable, ret, resp);
+	if (ret)
+		return ret;
+
+	return resp;
 }
 
 static inline int mdss_mdp_suspend_sub(struct mdss_data_type *mdata)
