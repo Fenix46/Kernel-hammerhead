@@ -27,20 +27,19 @@
 #include <linux/uaccess.h>
 #include <linux/debugfs.h>
 #include <linux/pm_runtime.h>
-#include <linux/clk.h>
 #include <linux/regulator/consumer.h>
 #include <linux/gpio.h>
 #include <linux/of_gpio.h>
 #include <linux/spinlock.h>
 #include <linux/firmware.h>
 #include <linux/spi/spi.h>
-#include <linux/pinctrl/consumer.h>
 #include <linux/usb.h>
 #include <linux/usb/hcd.h>
 #include <linux/usb/ch9.h>
 #include <linux/usb/ch11.h>
 
 #include <asm/unaligned.h>
+#include <mach/gpiomux.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/ice40.h>
@@ -152,9 +151,6 @@ struct ice40_hcd {
 	struct workqueue_struct *wq;
 	struct work_struct async_work;
 
-	struct clk *xo_clk;
-
-	struct pinctrl *pinctrl;
 	int reset_gpio;
 	int slave_select_gpio;
 	int config_done_gpio;
@@ -1229,7 +1225,7 @@ static int ice40_bus_resume(struct usb_hcd *hcd)
 {
 	struct ice40_hcd *ihcd = hcd_to_ihcd(hcd);
 	u8 ctrl0;
-	int ret;
+	int ret, i;
 
 	pm_stay_awake(&ihcd->spi->dev);
 	trace_ice40_bus_resume(0); /* start */
@@ -1238,7 +1234,18 @@ static int ice40_bus_resume(struct usb_hcd *hcd)
 	 * Re-program the previous settings. For now we need to
 	 * update the device address only.
 	 */
-	ice40_spi_load_fw(ihcd);
+
+	for (i = 0; i < 3; i++) {
+		ret = ice40_spi_load_fw(ihcd);
+		if (!ret)
+			break;
+	}
+
+	if (ret) {
+		pr_err("Load firmware failed with ret: %d\n", ret);
+		return ret;
+	}
+
 	ice40_spi_reg_write(ihcd, ihcd->devnum, FADDR_REG);
 	ihcd->wblen0 = ~0;
 
@@ -1372,8 +1379,6 @@ static void ice40_spi_power_off(struct ice40_hcd *ihcd)
 		regulator_disable(ihcd->gpio_vcc);
 	if (ihcd->clk_en_gpio)
 		gpio_direction_output(ihcd->clk_en_gpio, 0);
-	if (ihcd->xo_clk)
-		clk_disable_unprepare(ihcd->xo_clk);
 
 	ihcd->powered = false;
 }
@@ -1382,19 +1387,11 @@ static int ice40_spi_power_up(struct ice40_hcd *ihcd)
 {
 	int ret;
 
-	if (ihcd->xo_clk) {
-		ret = clk_prepare_enable(ihcd->xo_clk);
-		if (ret < 0) {
-			pr_err("fail to enable xo clk %d\n", ret);
-			goto out;
-		}
-	}
-
 	if (ihcd->clk_en_gpio) {
 		ret = gpio_direction_output(ihcd->clk_en_gpio, 1);
 		if (ret < 0) {
-			pr_err("fail to enable clk %d\n", ret);
-			goto disable_xo;
+			pr_err("fail to enabel clk %d\n", ret);
+			goto out;
 		}
 	}
 
@@ -1438,14 +1435,17 @@ disable_gpio_vcc:
 disable_clk:
 	if (ihcd->clk_en_gpio)
 		gpio_direction_output(ihcd->clk_en_gpio, 0);
-disable_xo:
-	if (ihcd->xo_clk)
-		clk_disable_unprepare(ihcd->xo_clk);
 out:
 	return ret;
 }
 
-#define CONFIG_LOAD_FREQ_MAX_HZ 25000000
+static struct gpiomux_setting slave_select_setting = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_NONE,
+	.dir = GPIOMUX_OUT_LOW,
+};
+
 static int ice40_spi_cache_fw(struct ice40_hcd *ihcd)
 {
 	const struct firmware *fw;
@@ -1490,11 +1490,7 @@ static int ice40_spi_cache_fw(struct ice40_hcd *ihcd)
 	 */
 	ihcd->fmsg_xfr[0].tx_buf = buf;
 	ihcd->fmsg_xfr[0].len = buf_len;
-
-	if (ihcd->spi->max_speed_hz < CONFIG_LOAD_FREQ_MAX_HZ)
-		ihcd->fmsg_xfr[0].speed_hz = ihcd->spi->max_speed_hz;
-	else
-		ihcd->fmsg_xfr[0].speed_hz = CONFIG_LOAD_FREQ_MAX_HZ;
+	ihcd->fmsg_xfr[0].speed_hz = 25000000;
 
 	return 0;
 
@@ -1507,6 +1503,7 @@ out:
 static int ice40_spi_load_fw(struct ice40_hcd *ihcd)
 {
 	int ret, i;
+	struct gpiomux_setting active_old_setting, suspend_old_setting;
 
 	ret = gpio_direction_output(ihcd->reset_gpio, 0);
 	if (ret  < 0) {
@@ -1528,33 +1525,41 @@ static int ice40_spi_load_fw(struct ice40_hcd *ihcd)
 	 * We temporarily override the chip select config to
 	 * drive it low. The SPI bus needs to be locked down during
 	 * this period to avoid other slave data going to our
-	 * bridge chip.
-	 *
+	 * bridge chip. Disable the SPI runtime suspend for exclusive
+	 * chip select access.
 	 */
+	pm_runtime_get_sync(ihcd->spi->master->dev.parent);
+
 	spi_bus_lock(ihcd->spi->master);
 
-	ret = gpio_request(ihcd->slave_select_gpio, "ice40_spi_cs");
+	ret = msm_gpiomux_write(ihcd->slave_select_gpio, GPIOMUX_SUSPENDED,
+			&slave_select_setting, &suspend_old_setting);
 	if (ret < 0) {
-		pr_err("fail to request slave select gpio %d\n", ret);
+		pr_err("fail to override suspend setting and select slave %d\n",
+				ret);
 		spi_bus_unlock(ihcd->spi->master);
+		pm_runtime_put_noidle(ihcd->spi->master->dev.parent);
 		goto out;
 	}
 
-	ret = gpio_direction_output(ihcd->slave_select_gpio, 0);
+	ret = msm_gpiomux_write(ihcd->slave_select_gpio, GPIOMUX_ACTIVE,
+			&slave_select_setting, &active_old_setting);
 	if (ret < 0) {
-		pr_err("fail to drive slave select gpio %d\n", ret);
-		gpio_free(ihcd->slave_select_gpio);
+		pr_err("fail to override active setting and select slave %d\n",
+				ret);
 		spi_bus_unlock(ihcd->spi->master);
+		pm_runtime_put_noidle(ihcd->spi->master->dev.parent);
 		goto out;
 	}
 
 	ret = ice40_spi_power_up(ihcd);
 	if (ret < 0) {
 		pr_err("fail to power up the chip\n");
-		gpio_free(ihcd->slave_select_gpio);
 		spi_bus_unlock(ihcd->spi->master);
+		pm_runtime_put_noidle(ihcd->spi->master->dev.parent);
 		goto out;
 	}
+
 
 	/*
 	 * The databook says 1200 usec is required before the
@@ -1562,8 +1567,25 @@ static int ice40_spi_load_fw(struct ice40_hcd *ihcd)
 	 */
 	usleep_range(1200, 1250);
 
-	gpio_direction_output(ihcd->slave_select_gpio, 1);
-	gpio_free(ihcd->slave_select_gpio);
+	ret = msm_gpiomux_write(ihcd->slave_select_gpio, GPIOMUX_SUSPENDED,
+			&suspend_old_setting, NULL);
+	if (ret < 0) {
+		pr_err("fail to rewrite suspend setting %d\n", ret);
+		spi_bus_unlock(ihcd->spi->master);
+		pm_runtime_put_noidle(ihcd->spi->master->dev.parent);
+		goto power_off;
+	}
+
+	ret = msm_gpiomux_write(ihcd->slave_select_gpio, GPIOMUX_ACTIVE,
+			&active_old_setting, NULL);
+	if (ret < 0) {
+		pr_err("fail to rewrite active setting %d\n", ret);
+		spi_bus_unlock(ihcd->spi->master);
+		pm_runtime_put_noidle(ihcd->spi->master->dev.parent);
+		goto power_off;
+	}
+
+	pm_runtime_put_noidle(ihcd->spi->master->dev.parent);
 
 	ret = spi_sync_locked(ihcd->spi, ihcd->fmsg);
 
@@ -1610,32 +1632,6 @@ static int ice40_spi_load_fw(struct ice40_hcd *ihcd)
 power_off:
 	ice40_spi_power_off(ihcd);
 out:
-	return ret;
-}
-
-static int ice40_spi_init_clocks(struct ice40_hcd *ihcd)
-{
-	int ret = 0;
-
-	/*
-	 * XO clock is the only supported clock. So no need to parse
-	 * the clock-names string. If there is no clock-names property,
-	 * there will not be XO clock.
-	 *
-	 * This XO clock can be either direct clock or pin control clock.
-	 * if it is pin control clock, clk_en gpio is used to control
-	 * the clock.
-	 */
-	if (!of_get_property(ihcd->spi->dev.of_node, "clock-names", NULL))
-		return 0;
-
-	ihcd->xo_clk = devm_clk_get(&ihcd->spi->dev, "xo");
-	if (IS_ERR(ihcd->xo_clk)) {
-		ret = PTR_ERR(ihcd->xo_clk);
-		if (ret != -EPROBE_DEFER)
-			pr_err("fail to get xo clk %d\n", ret);
-	}
-
 	return ret;
 }
 
@@ -1695,13 +1691,6 @@ out:
 static int ice40_spi_request_gpios(struct ice40_hcd *ihcd)
 {
 	int ret;
-
-	ihcd->pinctrl = devm_pinctrl_get_select_default(&ihcd->spi->dev);
-	if (IS_ERR(ihcd->pinctrl)) {
-		ret = PTR_ERR(ihcd->pinctrl);
-		pr_err("fail to get pinctrl info %d\n", ret);
-		goto out;
-	}
 
 	ret = devm_gpio_request(&ihcd->spi->dev, ihcd->reset_gpio,
 				"ice40_reset");
@@ -1936,6 +1925,13 @@ static ssize_t ice40_dbg_cmd_write(struct file *file, const char __user *ubuf,
 		ihcd->port_flags |= (USB_PORT_STAT_C_CONNECTION << 16);
 		ihcd->pcd_pending = true;
 		usb_hcd_poll_rh_status(ihcd->hcd);
+	} else if (!strcmp(buf, "config_test")) {
+		ice40_spi_power_off(ihcd);
+		ret = ice40_spi_load_fw(ihcd);
+		if (ret) {
+			pr_err("config load failed\n");
+			goto out;
+		}
 	} else {
 		ret = -EINVAL;
 		goto out;
@@ -1996,12 +1992,6 @@ static int ice40_spi_probe(struct spi_device *spi)
 	ret = ice40_spi_parse_dt(ihcd);
 	if (ret) {
 		pr_err("fail to parse dt node\n");
-		goto out;
-	}
-
-	ret = ice40_spi_init_clocks(ihcd);
-	if (ret) {
-		pr_err("fail to init clocks\n");
 		goto out;
 	}
 
@@ -2115,7 +2105,6 @@ static int ice40_spi_remove(struct spi_device *spi)
 {
 	struct usb_hcd *hcd = spi_get_drvdata(spi);
 	struct ice40_hcd *ihcd = hcd_to_ihcd(hcd);
-	struct pinctrl_state *s;
 
 	debugfs_remove_recursive(ihcd->dbg_root);
 
@@ -2123,10 +2112,6 @@ static int ice40_spi_remove(struct spi_device *spi)
 	usb_put_hcd(hcd);
 	destroy_workqueue(ihcd->wq);
 	ice40_spi_power_off(ihcd);
-
-	s = pinctrl_lookup_state(ihcd->pinctrl, PINCTRL_STATE_SLEEP);
-	if (!IS_ERR(s))
-		pinctrl_select_state(ihcd->pinctrl, s);
 
 	pm_runtime_disable(&spi->dev);
 	pm_relax(&spi->dev);
@@ -2153,3 +2138,4 @@ module_spi_driver(ice40_spi_driver);
 
 MODULE_DESCRIPTION("ICE40 FPGA based SPI-USB bridge HCD");
 MODULE_LICENSE("GPL v2");
+

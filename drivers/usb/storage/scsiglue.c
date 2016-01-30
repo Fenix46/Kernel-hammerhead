@@ -186,12 +186,6 @@ static int slave_configure(struct scsi_device *sdev)
 		/* Some devices don't handle VPD pages correctly */
 		sdev->skip_vpd_pages = 1;
 
-		/* Do not attempt to use REPORT SUPPORTED OPERATION CODES */
-		sdev->no_report_opcodes = 1;
-
-		/* Do not attempt to use WRITE SAME */
-		sdev->no_write_same = 1;
-
 		/* Some disks return the total number of blocks in response
 		 * to READ CAPACITY rather than the highest block number.
 		 * If this device makes that mistake, tell the sd driver. */
@@ -207,12 +201,6 @@ static int slave_configure(struct scsi_device *sdev)
 		/* Some devices cannot handle READ_CAPACITY_16 */
 		if (us->fflags & US_FL_NO_READ_CAPACITY_16)
 			sdev->no_read_capacity_16 = 1;
-
-		/*
-		 * Many devices do not respond properly to READ_CAPACITY_16.
-		 * Tell the SCSI layer to try READ_CAPACITY_10 first.
-		 */
-		sdev->try_rc_10_first = 1;
 
 		/* assume SPC3 or latter devices support sense size > 18 */
 		if (sdev->scsi_level > SCSI_SPC_2)
@@ -243,15 +231,10 @@ static int slave_configure(struct scsi_device *sdev)
 				us->protocol == USB_PR_BULK)
 			us->use_last_sector_hacks = 1;
 
-		/* Check if write cache default on flag is set or not */
-		if (us->fflags & US_FL_WRITE_CACHE)
-			sdev->wce_default_on = 1;
-
 		if (us->sdev_autosuspend_delay >= 0) {
 			sdev->use_rpm_auto = 1;
 			sdev->autosuspend_delay = us->sdev_autosuspend_delay;
 		}
-
 	} else {
 
 		/* Non-disk-type devices don't need to blacklist any pages
@@ -318,6 +301,8 @@ static int queuecommand_lck(struct scsi_cmnd *srb,
 {
 	struct us_data *us = host_to_us(srb->device->host);
 
+	US_DEBUGP("%s called\n", __func__);
+
 	/* check for state-transition errors */
 	if (us->srb != NULL) {
 		printk(KERN_ERR USB_STORAGE "Error in %s: us->srb = %p\n",
@@ -327,7 +312,7 @@ static int queuecommand_lck(struct scsi_cmnd *srb,
 
 	/* fail the command if we are disconnecting */
 	if (test_bit(US_FLIDX_DISCONNECTING, &us->dflags)) {
-		usb_stor_dbg(us, "Fail command during disconnect\n");
+		US_DEBUGP("Fail command during disconnect\n");
 		srb->result = DID_NO_CONNECT << 16;
 		done(srb);
 		return 0;
@@ -352,7 +337,7 @@ static int command_abort(struct scsi_cmnd *srb)
 {
 	struct us_data *us = host_to_us(srb->device->host);
 
-	usb_stor_dbg(us, "%s called\n", __func__);
+	US_DEBUGP("%s called\n", __func__);
 
 	/* us->srb together with the TIMED_OUT, RESETTING, and ABORTING
 	 * bits are protected by the host lock. */
@@ -361,7 +346,7 @@ static int command_abort(struct scsi_cmnd *srb)
 	/* Is this command still active? */
 	if (us->srb != srb) {
 		scsi_unlock(us_to_host(us));
-		usb_stor_dbg(us, "-- nothing to abort\n");
+		US_DEBUGP ("-- nothing to abort\n");
 		return FAILED;
 	}
 
@@ -389,7 +374,7 @@ static int device_reset(struct scsi_cmnd *srb)
 	struct us_data *us = host_to_us(srb->device->host);
 	int result;
 
-	usb_stor_dbg(us, "%s called\n", __func__);
+	US_DEBUGP("%s called\n", __func__);
 
 	/* lock the device pointers and do the reset */
 	mutex_lock(&(us->dev_mutex));
@@ -405,8 +390,7 @@ static int bus_reset(struct scsi_cmnd *srb)
 	struct us_data *us = host_to_us(srb->device->host);
 	int result;
 
-	usb_stor_dbg(us, "%s called\n", __func__);
-
+	US_DEBUGP("%s called\n", __func__);
 	result = usb_stor_port_reset(us);
 	return result < 0 ? FAILED : SUCCESS;
 }
@@ -441,6 +425,76 @@ void usb_stor_report_bus_reset(struct us_data *us)
 /***********************************************************************
  * /proc/scsi/ functions
  ***********************************************************************/
+#if 0
+/* we use this macro to help us write into the buffer */
+#undef SPRINTF
+#define SPRINTF(args...) \
+	do { if (pos < buffer+length) pos += sprintf(pos, ## args); } while (0)
+
+static int proc_info (struct Scsi_Host *host, char *buffer,
+		char **start, off_t offset, int length, int inout)
+{
+	struct us_data *us = host_to_us(host);
+	char *pos = buffer;
+	const char *string;
+
+	/* if someone is sending us data, just throw it away */
+	if (inout)
+		return length;
+
+	/* print the controller name */
+	SPRINTF("   Host scsi%d: usb-storage\n", host->host_no);
+
+	/* print product, vendor, and serial number strings */
+	if (us->pusb_dev->manufacturer)
+		string = us->pusb_dev->manufacturer;
+	else if (us->unusual_dev->vendorName)
+		string = us->unusual_dev->vendorName;
+	else
+		string = "Unknown";
+	SPRINTF("       Vendor: %s\n", string);
+	if (us->pusb_dev->product)
+		string = us->pusb_dev->product;
+	else if (us->unusual_dev->productName)
+		string = us->unusual_dev->productName;
+	else
+		string = "Unknown";
+	SPRINTF("      Product: %s\n", string);
+	if (us->pusb_dev->serial)
+		string = us->pusb_dev->serial;
+	else
+		string = "None";
+	SPRINTF("Serial Number: %s\n", string);
+
+	/* show the protocol and transport */
+	SPRINTF("     Protocol: %s\n", us->protocol_name);
+	SPRINTF("    Transport: %s\n", us->transport_name);
+
+	/* show the device flags */
+	if (pos < buffer + length) {
+		pos += sprintf(pos, "       Quirks:");
+
+#define US_FLAG(name, value) \
+	if (us->fflags & value) pos += sprintf(pos, " " #name);
+US_DO_ALL_FLAGS
+#undef US_FLAG
+
+		*(pos++) = '\n';
+	}
+
+	/*
+	 * Calculate start of next buffer, and return value.
+	 */
+	*start = buffer + offset;
+
+	if ((pos - buffer) < offset)
+		return (0);
+	else if ((pos - buffer - offset) < length)
+		return (pos - buffer - offset);
+	else
+		return (length);
+}
+#endif
 
 static int write_info(struct Scsi_Host *host, char *buffer, int length)
 {
@@ -495,7 +549,6 @@ US_DO_ALL_FLAGS
 	seq_putc(m, '\n');
 	return 0;
 }
-
 /***********************************************************************
  * Sysfs interface
  ***********************************************************************/
@@ -594,3 +647,4 @@ unsigned char usb_stor_sense_invalidCDB[18] = {
 	[12]	= 0x24			    /* Invalid Field in CDB */
 };
 EXPORT_SYMBOL_GPL(usb_stor_sense_invalidCDB);
+

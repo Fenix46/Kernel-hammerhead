@@ -44,6 +44,7 @@ static struct usb_interface_descriptor audio_source_ac_interface_desc = {
 	.bInterfaceSubClass =	USB_SUBCLASS_AUDIOCONTROL,
 };
 
+
 #define UAC_DT_AC_HEADER_LENGTH	UAC_DT_AC_HEADER_SIZE(AUDIO_NUM_INTERFACES)
 /* 1 input terminal, 1 output terminal and 1 feature unit */
 #define UAC_DT_TOTAL_LENGTH (UAC_DT_AC_HEADER_LENGTH \
@@ -259,12 +260,15 @@ struct audio_dev {
 	s64				frames_sent;
 
 	bool				audio_ep_enabled;
+	bool				triggered;
 };
 
-static inline struct audio_dev *audio_source_func_to_audio(struct usb_function *f)
+static inline struct audio_dev *func_to_audio_source(struct usb_function *f)
 {
 	return container_of(f, struct audio_dev, func);
 }
+
+static void audio_pcm_playback_start(struct audio_dev *audio);
 
 /*-------------------------------------------------------------------------*/
 
@@ -543,7 +547,7 @@ audio_setup(struct usb_function *f, const struct usb_ctrlrequest *ctrl)
 
 static int audio_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 {
-	struct audio_dev *audio = audio_source_func_to_audio(f);
+	struct audio_dev *audio = func_to_audio_source(f);
 	struct usb_composite_dev *cdev = f->config->cdev;
 	int ret;
 
@@ -552,11 +556,23 @@ static int audio_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 	if (intf == as_interface_alt_1_desc.bInterfaceNumber) {
 		if (alt && !audio->audio_ep_enabled) {
 			ret = config_ep_by_speed(cdev->gadget, f, audio->in_ep);
-			if (ret)
+			if (ret) {
+				audio->in_ep->desc = NULL;
+				ERROR(cdev, "config_ep fail ep %s, result %d\n",
+						audio->in_ep->name, ret);
 				return ret;
-
-			usb_ep_enable(audio->in_ep);
+			}
+			ret = usb_ep_enable(audio->in_ep);
+			if (ret) {
+				ERROR(cdev, "failedto enable ep%s, result %d\n",
+					audio->in_ep->name, ret);
+				return ret;
+			}
 			audio->audio_ep_enabled = true;
+			if (audio->triggered) {
+				// resume playing if we are still triggered
+				audio_pcm_playback_start(audio);
+			}
 		} else if (!alt && audio->audio_ep_enabled) {
 			usb_ep_disable(audio->in_ep);
 			audio->audio_ep_enabled = false;
@@ -567,7 +583,7 @@ static int audio_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 
 static void audio_disable(struct usb_function *f)
 {
-	struct audio_dev	*audio = audio_source_func_to_audio(f);
+	struct audio_dev *audio = func_to_audio_source(f);
 
 	pr_debug("audio_disable\n");
 	if (audio->audio_ep_enabled) {
@@ -598,7 +614,7 @@ static int
 audio_bind(struct usb_configuration *c, struct usb_function *f)
 {
 	struct usb_composite_dev *cdev = c->cdev;
-	struct audio_dev *audio = audio_source_func_to_audio(f);
+	struct audio_dev *audio = func_to_audio_source(f);
 	int status;
 	struct usb_ep *ep;
 	struct usb_request *req;
@@ -631,9 +647,6 @@ audio_bind(struct usb_configuration *c, struct usb_function *f)
 		hs_as_in_ep_desc.bEndpointAddress =
 			fs_as_in_ep_desc.bEndpointAddress;
 
-	f->fs_descriptors = fs_audio_desc;
-	f->hs_descriptors = hs_audio_desc;
-
 	for (i = 0, status = 0; i < IN_EP_REQ_COUNT && status == 0; i++) {
 		req = audio_request_new(ep, IN_EP_MAX_PACKET_SIZE);
 		if (req) {
@@ -651,7 +664,7 @@ fail:
 static void
 audio_unbind(struct usb_configuration *c, struct usb_function *f)
 {
-	struct audio_dev *audio = audio_source_func_to_audio(f);
+	struct audio_dev *audio = func_to_audio_source(f);
 	struct usb_request *req;
 
 	while ((req = audio_req_get(audio)))
@@ -781,11 +794,13 @@ static int audio_pcm_playback_trigger(struct snd_pcm_substream *substream,
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_RESUME:
+		audio->triggered = 1;
 		audio_pcm_playback_start(audio);
 		break;
 
 	case SNDRV_PCM_TRIGGER_STOP:
 	case SNDRV_PCM_TRIGGER_SUSPEND:
+		audio->triggered = 0;
 		audio_pcm_playback_stop(audio);
 		break;
 
@@ -820,6 +835,8 @@ static struct audio_dev _audio_dev = {
 		.set_alt = audio_set_alt,
 		.setup = audio_setup,
 		.disable = audio_disable,
+		.descriptors = fs_audio_desc,
+		.hs_descriptors = hs_audio_desc,
 	},
 	.lock = __SPIN_LOCK_UNLOCKED(_audio_dev.lock),
 	.idle_reqs = LIST_HEAD_INIT(_audio_dev.idle_reqs),

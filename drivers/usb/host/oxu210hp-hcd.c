@@ -1399,8 +1399,8 @@ static struct ehci_qh *qh_make(struct oxu_hcd *oxu,
 				 * But interval 1 scheduling is simpler, and
 				 * includes high bandwidth.
 				 */
-				oxu_dbg(oxu, "intr period %d uframes, NYET!\n",
-					urb->interval);
+				dbg("intr period %d uframes, NYET!",
+						urb->interval);
 				goto done;
 			}
 		} else {
@@ -1471,7 +1471,7 @@ static struct ehci_qh *qh_make(struct oxu_hcd *oxu,
 		}
 		break;
 	default:
-		oxu_dbg(oxu, "bogus dev %p speed %d\n", urb->dev, urb->dev->speed);
+		dbg("bogus dev %p speed %d", urb->dev, urb->dev->speed);
 done:
 		qh_put(qh);
 		return NULL;
@@ -2307,7 +2307,7 @@ restart:
 				qh_put(temp.qh);
 				break;
 			default:
-				oxu_dbg(oxu, "corrupt type %d frame %d shadow %p\n",
+				dbg("corrupt type %d frame %d shadow %p",
 					type, frame, q.ptr);
 				q.ptr = NULL;
 			}
@@ -2991,9 +2991,8 @@ static int oxu_urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status)
 				/* shouldn't happen often, but ...
 				 * FIXME kill those tds' urbs
 				 */
-				dev_err(hcd->self.controller,
-					"can't reschedule qh %p, err %d\n", qh,
-					status);
+				err("can't reschedule qh %p, err %d",
+					qh, status);
 			}
 			return status;
 		}
@@ -3084,7 +3083,7 @@ static int oxu_hub_status_data(struct usb_hcd *hcd, char *buf)
 	int ports, i, retval = 1;
 	unsigned long flags;
 
-	/* if !PM_RUNTIME, root hub timers won't get shut down ... */
+	/* if !USB_SUSPEND, root hub timers won't get shut down ... */
 	if (!HC_IS_RUNNING(hcd->state))
 		return 0;
 
