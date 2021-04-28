@@ -19,6 +19,12 @@
 #include <linux/reboot.h>
 #include <linux/io.h>
 #include <asm/setup.h>
+#include <linux/memblock.h>
+#include <linux/slab.h>
+#include <linux/of.h>
+#include <linux/of_address.h>
+#include <linux/cpu.h>
+#include <linux/delay.h>
 #include <linux/init.h>
 #include <mach/subsystem_restart.h>
 #include <mach/msm_iomap.h>
@@ -33,13 +39,14 @@
 #define RAM_CONSOLE_SIZE_ADDR     0x24
 #define FB1_ADDR_ADDR             0x28
 
-#define RESTART_REASON      (MSM_IMEM_BASE + RESTART_REASON_ADDR)
+#define RESTART_REASON      (msm_imem_base + RESTART_REASON_ADDR)
 #define UEFI_RAM_DUMP_MAGIC \
-		(MSM_IMEM_BASE + DLOAD_MODE_ADDR + UEFI_RAM_DUMP_MAGIC_ADDR)
-#define RAM_CONSOLE_ADDR    (MSM_IMEM_BASE + RAM_CONSOLE_ADDR_ADDR)
-#define RAM_CONSOLE_SIZE    (MSM_IMEM_BASE + RAM_CONSOLE_SIZE_ADDR)
-#define FB1_ADDR            (MSM_IMEM_BASE + FB1_ADDR_ADDR)
+		(msm_imem_base + DLOAD_MODE_ADDR + UEFI_RAM_DUMP_MAGIC_ADDR)
+#define RAM_CONSOLE_ADDR    (msm_imem_base + RAM_CONSOLE_ADDR_ADDR)
+#define RAM_CONSOLE_SIZE    (msm_imem_base + RAM_CONSOLE_SIZE_ADDR)
+#define FB1_ADDR            (msm_imem_base + FB1_ADDR_ADDR)
 
+static void *msm_imem_base;
 static int dummy_arg;
 
 static int subsys_crash_magic = 0x0;
