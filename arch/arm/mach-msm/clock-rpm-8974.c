@@ -340,6 +340,8 @@ static int msm_rpmcc_8974_probe(struct platform_device *pdev)
 	 * to remain on whenever CPUs aren't power collapsed.
 	 */
 	clk_prepare_enable(&cxo_a_clk_src.c);
+	
+	clk_prepare_enable(&cxo_d1_pin.c);
 
 	dev_info(&pdev->dev, "Registered RPM clocks.\n");
 
