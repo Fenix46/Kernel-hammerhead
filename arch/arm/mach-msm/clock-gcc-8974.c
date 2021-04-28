@@ -2412,7 +2412,7 @@ static struct clk_lookup msm_clocks_gcc_8974[] = {
 	CLK_LOOKUP_OF("iface_clk", gcc_blsp2_ahb_clk, "f9966000.spi"),
 	CLK_LOOKUP_OF("iface_clk", gcc_blsp2_ahb_clk, "f995e000.serial"),
 #ifdef CONFIG_LGE_BLUETOOTH
-	CLK_LOOKUP_OF("iface_clk", gcc_blsp2_ahb_clk.c, "f9960000.uart"),
+	CLK_LOOKUP_OF("iface_clk", gcc_blsp2_ahb_clk, "f9960000.uart"),
 #endif	
 	CLK_LOOKUP_OF("iface_clk", gcc_blsp2_ahb_clk, "f995d000.uart"),
 	CLK_LOOKUP_OF("core_clk", gcc_blsp2_qup1_i2c_apps_clk, ""),
