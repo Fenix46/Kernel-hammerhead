@@ -2536,17 +2536,14 @@ static struct clk_lookup msm_clocks_gcc_8974[] = {
 			gcc_blsp1_qup6_i2c_apps_clk, "f9928000.i2c"),
 
 	CLK_LOOKUP_OF("wcnss_debug", wcnss_m_clk, "fb000000.qcom,wcnss-wlan"),
- 	CLK_LOOKUP_OF("xo",         cxo_d1_pin.c,                 "bcm2079x"),
 
 };
 
 static struct clk_lookup msm_clocks_gcc_8974_only[] = {
 	/* Camera Sensor clocks */
 	CLK_LOOKUP_OF("cam_src_clk", gp1_clk_src, "6c.qcom,camera"),
-	CLK_LOOKUP_OF("cam_src_clk", mclk2_clk_src.c, "90.qcom,camera"),
 	CLK_LOOKUP_OF("cam_clk", gcc_gp1_clk, "6c.qcom,camera"),
 	CLK_LOOKUP_OF("cam_src_clk", gp1_clk_src, "2.qcom,camera"),
- 	CLK_LOOKUP_OF("cam_clk", camss_mclk2_clk.c, "90.qcom,camera"),
 	CLK_LOOKUP_OF("cam_clk", gcc_gp1_clk, "2.qcom,camera"),
 };
 
@@ -2689,7 +2686,6 @@ static int msm_gcc_8974_probe(struct platform_device *pdev)
 	 */
 	clk_prepare_enable(&gcc_mmss_noc_cfg_ahb_clk.c);
 	clk_prepare_enable(&gcc_ocmem_noc_cfg_ahb_clk.c);
- 	clk_prepare_enable(&cxo_d1_pin.c);
 
 	/* Set rates for single-rate clocks. */
 	clk_set_rate(&usb30_master_clk_src.c,
