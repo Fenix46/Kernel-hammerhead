@@ -1046,10 +1046,6 @@ static struct rcg_clk ce2_clk_src = {
 
 static struct clk_freq_tbl ftbl_gcc_gp_clk[] = {
 	F( 4800000,   cxo,  4,  0,   0),
-#if defined(CONFIG_MSM8974_PWM_VIBRATOR)
-	F(29268,       cxo,  16,   1,  41), /* for 230Hz */
-	F(22222,       cxo,  16,   1,  54), /* for 175Hz */
-#endif
 	F( 6000000, gpll0, 10,  1,  10),
 	F( 6750000, gpll0,  1,  1,  89),
 	F( 8000000, gpll0, 15,  1,   5),
@@ -2538,9 +2534,7 @@ static struct clk_lookup msm_clocks_gcc_8974[] = {
 	CLK_LOOKUP_OF("iface_clk", gcc_blsp1_ahb_clk, "f9928000.i2c"),
 	CLK_LOOKUP_OF("core_clk",
 			gcc_blsp1_qup6_i2c_apps_clk, "f9928000.i2c"),
-#if defined(CONFIG_MSM8974_PWM_VIBRATOR)
-	CLK_LOOKUP("cam_gp1_clk", camss_gp1_clk.c, "vibrator"),
-#endif
+
 	CLK_LOOKUP_OF("wcnss_debug", wcnss_m_clk, "fb000000.qcom,wcnss-wlan"),
  	CLK_LOOKUP_OF("xo",         cxo_d1_pin.c,                 "bcm2079x"),
 
