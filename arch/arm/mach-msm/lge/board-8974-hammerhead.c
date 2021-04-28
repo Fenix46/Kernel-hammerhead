@@ -41,7 +41,7 @@
 #include <mach/restart.h>
 #include <mach/rpm-smd.h>
 #include <mach/rpm-regulator-smd.h>
-#include <mach/socinfo.h>
+#include <soc/qcom/socinfo.h>
 #include <mach/msm_bus_board.h>
 #include "../board-dt.h"
 #include "../clock.h"
