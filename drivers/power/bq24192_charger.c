@@ -72,7 +72,7 @@ struct bq24192_chip {
 	struct i2c_client  *client;
 	struct delayed_work  irq_work;
 	struct dentry  *dent;
-	struct wake_lock  chg_wake_lock;
+	struct wake_lock  *chg_wake_lock;
 	struct power_supply  *usb_psy;
 	struct power_supply  ac_psy;
 	struct power_supply  *wlc_psy;
