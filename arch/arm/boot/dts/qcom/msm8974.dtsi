@@ -1897,7 +1897,7 @@
 			<0xfb012448 0x00000008>,
 			<0xfb080c00 0x00000001>;
 
-		reg-names = "wcnss_mmio", "wcnss_fiq",
+		reg-names = "wl_reg", "wcnss_mmio", "wcnss_fiq",
 			    "pronto_phy_base", "riva_phy_base",
 			    "riva_ccu_base", "pronto_a2xb_base",
 			    "pronto_ccpu_base", "pronto_saw2_base",
