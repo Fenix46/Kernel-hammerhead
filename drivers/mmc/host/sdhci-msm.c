@@ -190,6 +190,12 @@ enum sdc_mpm_pin_state {
 #define sdhci_is_valid_mpm_wakeup_int(_h) ((_h)->pdata->mpm_sdiowakeup_int >= 0)
 #define sdhci_is_valid_gpio_wakeup_int(_h) ((_h)->pdata->sdiowakeup_irq >= 0)
 
+#if defined(CONFIG_WIFI_CONTROL_FUNC)
+extern int wcf_status_register(
+		void (*cb)(int card_present, void *dev), void *dev);
+extern unsigned int wcf_status(struct device *dev);
+#endif
+
 #define NUM_TUNING_PHASES		16
 #define MAX_DRV_TYPES_SUPPORTED_HS200	3
 

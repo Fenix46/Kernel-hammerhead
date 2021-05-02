@@ -6,5 +6,7 @@ obj-$(CONFIG_MACH_DORY) += board-8026-dory.o
 obj-$(CONFIG_MACH_DORY) += board-8026-dory-gpiomux.o
 obj-$(CONFIG_MACH_MSM8974_HAMMERHEAD) += board-8974-hammerhead.o
 obj-$(CONFIG_MACH_MSM8974_HAMMERHEAD) += board-8974-hammerhead-gpiomux.o
+obj-$(CONFIG_LGE_BLUETOOTH) += board-8974-rfkill.o
+obj-$(CONFIG_WIFI_CONTROL_FUNC) += board-wifi-bcm.o
 obj-$(CONFIG_LGE_BLUETOOTH) += board-8026-dory-rfkill.o
 obj-$(CONFIG_LGE_HANDLE_PANIC) += lge_handle_panic.o

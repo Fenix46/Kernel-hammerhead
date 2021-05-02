@@ -59,6 +59,11 @@ static void __init msm8974_early_memory(void)
  * into this category, and thus the driver should not be added here. The
  * EPROBE_DEFER can satisfy most dependency problems.
  */
+ 
+#if defined (CONFIG_BCMDHD) || defined (CONFIG_BCMDHD_MODULE)
+extern void init_bcm_wifi(void);
+#endif
+ 
 void __init msm8974_add_drivers(void)
 {
 	msm_smd_init();
@@ -68,6 +73,9 @@ void __init msm8974_add_drivers(void)
 	msm_spm_device_init();
 	krait_power_init();
 	lge_add_persistent_device();
+#if defined (CONFIG_BCMDHD) || defined (CONFIG_BCMDHD_MODULE)
+	init_bcm_wifi();
+#endif
 }
 
 static struct of_dev_auxdata msm_hsic_host_adata[] = {
