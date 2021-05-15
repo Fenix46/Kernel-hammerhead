@@ -12,6 +12,7 @@
 
 #include "msm8974-hammerhead-panel.dtsi"
 #include "msm8974-hammerhead-input.dtsi"
+#include "msm8974-hammerhead-pm.dtsi"
 
 &soc {
         i2c@f9923000 {
@@ -57,8 +58,45 @@
 		status = "disabled";
 	};
 
-	sound {
-		qcom,mbhc-disabled = <0>;
+        sound {
+		compatible = "qcom,msm8974-audio-taiko";
+		qcom,model = "msm8974-taiko-mtp-snd-card";
+
+		qcom,mbhc-disabled = <1>;
+
+		qcom,hdmi-audio-rx;
+
+		qcom,audio-routing =
+			"RX_BIAS", "MCLK",
+			"LDO_H", "MCLK",
+			"AIF4 MAD", "MCLK",
+			"AMIC1", "MIC BIAS1 External",
+			"MIC BIAS1 External", "Handset Mic",
+			"AMIC2", "MIC BIAS2 External",
+			"MIC BIAS2 External", "Headset Mic",
+			"AMIC3", "MIC BIAS3 External",
+			"MIC BIAS3 External", "Handset SubMic",
+			"DMIC1", "MIC BIAS1 External",
+			"MIC BIAS1 External", "Digital Mic1",
+			"DMIC2", "MIC BIAS1 External",
+			"MIC BIAS1 External", "Digital Mic2",
+			"DMIC3", "MIC BIAS3 External",
+			"MIC BIAS3 External", "Digital Mic3",
+			"DMIC4", "MIC BIAS3 External",
+			"MIC BIAS3 External", "Digital Mic4",
+			"DMIC5", "MIC BIAS4 External",
+			"MIC BIAS4 External", "Digital Mic5",
+			"DMIC6", "MIC BIAS4 External",
+			"MIC BIAS4 External", "Digital Mic6";
+
+		qcom,cdc-mclk-gpios = <&pm8941_gpios 15 0>;
+		taiko-mclk-clk = <&pm8941_clkdiv1>;
+		qcom,taiko-mclk-clk-freq = <9600000>;
+	};
+	
+	
+	qcom,bam_dmux@fc834000 {
+		qcom,fast-shutdown;
 	};
 
 	vibrator {
@@ -85,4 +123,32 @@
 
 	qcom,nonremovable;
 	status = "ok";
+};
+
+&slim_msm {
+	taiko_codec {
+		qcom,cdc-micbias-cfilt2-mv = <2800>;
+		qcom,cdc-micbias2-no-ext-cap;
+		qcom,cdc-micbias3-cfilt-sel = <0x0>;
+		qcom,cdc-micbias4-cfilt-sel = <0x0>;
+	};
+};
+
+&spi_epm {
+	epm-adc@0 {
+		compatible = "cy,epm-adc-cy8c5568lti-114";
+		reg = <0>;
+		interrupt-parent = <&msmgpio>;
+		spi-max-frequency = <960000>;
+		qcom,channels = <31>;
+		qcom,gain = <100 100 100 50 100 100 1 100 1 50
+			1 100 1 100 50 50 50 50 50 50
+			100 50 100 50 50 50 50 50 50 50
+			50>;
+		qcom,rsense = <2 2 2 200 20 2 1 2 1 30
+			1 10 1 30 50 30 500 30 100 30
+			100 500 20 200 1000 20 1000 1000 70 200
+			50>;
+		qcom,channel-type = <0x1540>;
+	};
 };
