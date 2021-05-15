@@ -13,6 +13,63 @@
 #include "msm8974-hammerhead-panel.dtsi"
 #include "msm8974-hammerhead-input.dtsi"
 
+&soc {
+        i2c@f9923000 {
+                smb349@2d {
+                        status = "ok";
+                };
+
+                bq24192@6b {
+                        status = "disabled";
+                };
+        };
+
+	i2c@f9924000 {
+		synaptics_s7020@20 {
+			status = "ok";
+		};
+	};
+
+	i2c@f9967000 {
+		lm3630@38 {
+			lm3630,lcd_bl_en = <&msmgpio 91 0x00>;
+		};
+	};
+
+	qcom,cci@fda0C000 {
+		qcom,camera@20 {
+			gpios = <&msmgpio 15 0>,  // MCLK
+			        <&msmgpio 90 0>,  // MAIN_CAM_RESET
+				<&msmgpio 16 0>,  // 13M_VANA_EN
+				<&msmgpio 96 0>,  // 13M_VIO_EN
+				<&msmgpio 57 0>,  // 13M_VCM_EN
+				<&msmgpio 145 0>, // OIS_LDO_EN
+				<&msmgpio 29 0>;  // OIS_RESET
+		};
+	};
+
+	qcom,mdss_dsi_lgit_video {
+		status = "ok";
+		qcom,cont-splash-enabled;
+	};
+
+	maxim_detic:maxim_max1462x {
+		status = "disabled";
+	};
+
+	sound {
+		qcom,mbhc-disabled = <0>;
+	};
+
+	vibrator {
+		motor-amp = <50>;
+		vibe-warmup-delay = <0>;
+		vibe-braking-gain = <0>;
+		vibe-braking-ms = <0>;
+		vibe-driving-ms = <0>;
+	};
+};
+
 &sdhc_1 {
 	vdd-supply = <&pm8941_l20>;
 	vdd-io-supply = <&pm8941_s3>;
