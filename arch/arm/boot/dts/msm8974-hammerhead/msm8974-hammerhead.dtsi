@@ -13,6 +13,8 @@
 #include "msm8974-hammerhead-panel.dtsi"
 #include "msm8974-hammerhead-input.dtsi"
 #include "msm8974-hammerhead-pm.dtsi"
+#include "msm8974-hammerhead-usb.dtsi"
+#include "msm8974-hammerhead-regulator.dtsi"
 
 &soc {
         i2c@f9923000 {
