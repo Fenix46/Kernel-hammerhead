@@ -12,6 +12,7 @@
 
 #include "msm8974-hammerhead-panel.dtsi"
 #include "msm8974-hammerhead-input.dtsi"
+#include "msm8974-hammerhead-misc.dtsi"
 #include "msm8974-hammerhead-pm.dtsi"
 #include "msm8974-hammerhead-usb.dtsi"
 
