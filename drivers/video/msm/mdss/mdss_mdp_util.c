@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -130,14 +130,14 @@ irqreturn_t mdss_mdp_isr(int irq, void *ptr)
 	u32 isr, mask, hist_isr, hist_mask;
 
 
-	isr = readl_relaxed(mdata->mdp_base + MDSS_MDP_REG_INTR_STATUS);
+	isr = MDSS_MDP_REG_READ(MDSS_MDP_REG_INTR_STATUS);
 
 	if (isr == 0)
 		goto mdp_isr_done;
 
 
-	mask = readl_relaxed(mdata->mdp_base + MDSS_MDP_REG_INTR_EN);
-	writel_relaxed(isr, mdata->mdp_base + MDSS_MDP_REG_INTR_CLEAR);
+	mask = MDSS_MDP_REG_READ(MDSS_MDP_REG_INTR_EN);
+	MDSS_MDP_REG_WRITE(MDSS_MDP_REG_INTR_CLEAR, isr);
 
 	pr_debug("%s: isr=%x mask=%x\n", __func__, isr, mask);
 
@@ -201,30 +201,21 @@ irqreturn_t mdss_mdp_isr(int irq, void *ptr)
 		mdss_misr_crc_collect(mdata, DISPLAY_MISR_HDMI);
 	}
 
-	if (isr & MDSS_MDP_INTR_WB_0_DONE) {
+	if (isr & MDSS_MDP_INTR_WB_0_DONE)
 		mdss_mdp_intr_done(MDP_INTR_WB_0);
-		mdss_misr_crc_collect(mdata, DISPLAY_MISR_MDP);
-	}
 
-	if (isr & MDSS_MDP_INTR_WB_1_DONE) {
+	if (isr & MDSS_MDP_INTR_WB_1_DONE)
 		mdss_mdp_intr_done(MDP_INTR_WB_1);
-		mdss_misr_crc_collect(mdata, DISPLAY_MISR_MDP);
-	}
 
-	if (isr & MDSS_MDP_INTR_WB_2_DONE) {
+	if (isr & MDSS_MDP_INTR_WB_2_DONE)
 		mdss_mdp_intr_done(MDP_INTR_WB_2);
-		mdss_misr_crc_collect(mdata, DISPLAY_MISR_MDP);
-	}
 
 mdp_isr_done:
-	hist_isr = readl_relaxed(mdata->mdp_base +
-			MDSS_MDP_REG_HIST_INTR_STATUS);
+	hist_isr = MDSS_MDP_REG_READ(MDSS_MDP_REG_HIST_INTR_STATUS);
 	if (hist_isr == 0)
 		goto hist_isr_done;
-	hist_mask = readl_relaxed(mdata->mdp_base +
-			MDSS_MDP_REG_HIST_INTR_EN);
-	writel_relaxed(hist_isr, mdata->mdp_base +
-		MDSS_MDP_REG_HIST_INTR_CLEAR);
+	hist_mask = MDSS_MDP_REG_READ(MDSS_MDP_REG_HIST_INTR_EN);
+	MDSS_MDP_REG_WRITE(MDSS_MDP_REG_HIST_INTR_CLEAR, hist_isr);
 	hist_isr &= hist_mask;
 	if (hist_isr == 0)
 		goto hist_isr_done;
@@ -245,41 +236,6 @@ struct mdss_mdp_format_params *mdss_mdp_get_format_params(u32 format)
 		}
 	}
 	return NULL;
-}
-
-void mdss_mdp_intersect_rect(struct mdss_mdp_img_rect *res_rect,
-	const struct mdss_mdp_img_rect *dst_rect,
-	const struct mdss_mdp_img_rect *sci_rect)
-{
-	int l = max(dst_rect->x, sci_rect->x);
-	int t = max(dst_rect->y, sci_rect->y);
-	int r = min((dst_rect->x + dst_rect->w), (sci_rect->x + sci_rect->w));
-	int b = min((dst_rect->y + dst_rect->h), (sci_rect->y + sci_rect->h));
-
-	if (r < l || b < t)
-		*res_rect = (struct mdss_mdp_img_rect){0, 0, 0, 0};
-	else
-		*res_rect = (struct mdss_mdp_img_rect){l, t, (r-l), (b-t)};
-}
-
-void mdss_mdp_crop_rect(struct mdss_mdp_img_rect *src_rect,
-	struct mdss_mdp_img_rect *dst_rect,
-	const struct mdss_mdp_img_rect *sci_rect)
-{
-	struct mdss_mdp_img_rect res;
-	mdss_mdp_intersect_rect(&res, dst_rect, sci_rect);
-
-	if (res.w && res.h) {
-		if ((res.w != dst_rect->w) || (res.h != dst_rect->h)) {
-			src_rect->x = src_rect->x + (res.x - dst_rect->x);
-			src_rect->y = src_rect->y + (res.y - dst_rect->y);
-			src_rect->w = res.w;
-			src_rect->h = res.h;
-		}
-		*dst_rect = (struct mdss_mdp_img_rect)
-			{(res.x - sci_rect->x), (res.y - sci_rect->y),
-			res.w, res.h};
-	}
 }
 
 int mdss_mdp_get_rau_strides(u32 w, u32 h,
@@ -428,7 +384,7 @@ int mdss_mdp_data_check(struct mdss_mdp_data *data,
 	if (!data || data->num_planes == 0)
 		return -ENOMEM;
 
-	pr_debug("srcp0=%pa len=%u frame_size=%u\n", &data->p[0].addr,
+	pr_debug("srcp0=%x len=%u frame_size=%u\n", data->p[0].addr,
 		data->p[0].len, ps->total_size);
 
 	for (i = 0; i < ps->num_planes; i++) {
@@ -447,8 +403,8 @@ int mdss_mdp_data_check(struct mdss_mdp_data *data,
 			       curr->len, i, ps->plane_size[i]);
 			return -ENOMEM;
 		}
-		pr_debug("plane[%d] addr=%pa len=%u\n", i,
-				&curr->addr, curr->len);
+		pr_debug("plane[%d] addr=%x len=%u\n", i,
+				curr->addr, curr->len);
 	}
 	data->num_planes = ps->num_planes;
 
@@ -484,17 +440,16 @@ int mdss_mdp_put_img(struct mdss_mdp_img_data *data)
 {
 	struct ion_client *iclient = mdss_get_ionclient();
 	if (data->flags & MDP_MEMORY_ID_TYPE_FB) {
-		pr_debug("fb mem buf=0x%pa\n", &data->addr);
+		pr_debug("fb mem buf=0x%x\n", data->addr);
 		fput_light(data->srcp_file, data->p_need);
 		data->srcp_file = NULL;
 	} else if (data->srcp_file) {
-		pr_debug("pmem buf=0x%pa\n", &data->addr);
+		pr_debug("pmem buf=0x%x\n", data->addr);
 		data->srcp_file = NULL;
 	} else if (!IS_ERR_OR_NULL(data->srcp_ihdl)) {
-		pr_debug("ion hdl=%p buf=0x%pa\n", data->srcp_ihdl,
-							&data->addr);
+		pr_debug("ion hdl=%p buf=0x%x\n", data->srcp_ihdl, data->addr);
 		if (!iclient) {
-			pr_err("invalid ion client\n");
+			pr_err("invalid_ion client\n");
 			return -ENOMEM;
 		} else {
 			if (is_mdss_iommu_attached()) {
@@ -504,12 +459,13 @@ int mdss_mdp_put_img(struct mdss_mdp_img_data *data)
 				else
 					domain = MDSS_IOMMU_DOMAIN_UNSECURE;
 				ion_unmap_iommu(iclient, data->srcp_ihdl,
-					mdss_get_iommu_domain(domain), 0);
+						mdss_get_iommu_domain(domain), 0);
 
 				if (domain == MDSS_IOMMU_DOMAIN_SECURE) {
 					msm_ion_unsecure_buffer(iclient,
 							data->srcp_ihdl);
 				}
+				data->mapped = false;
 			}
 			ion_free(iclient, data->srcp_ihdl);
 			data->srcp_ihdl = NULL;
@@ -611,8 +567,8 @@ int mdss_mdp_get_img(struct msmfb_data *img, struct mdss_mdp_img_data *data)
 		data->addr += img->offset;
 		data->len -= img->offset;
 
-		pr_debug("mem=%d ihdl=%p buf=0x%pa len=0x%x\n", img->memory_id,
-			 data->srcp_ihdl, &data->addr, data->len);
+		pr_debug("mem=%d ihdl=%p buf=0x%x len=0x%x\n", img->memory_id,
+			 data->srcp_ihdl, data->addr, data->len);
 	} else {
 		mdss_mdp_put_img(data);
 		return ret ? : -EOVERFLOW;
@@ -623,23 +579,18 @@ int mdss_mdp_get_img(struct msmfb_data *img, struct mdss_mdp_img_data *data)
 
 int mdss_mdp_calc_phase_step(u32 src, u32 dst, u32 *out_phase)
 {
-	u32 unit, residue, result;
+	u32 unit, residue;
 
-	if (src == 0 || dst == 0)
+	if (dst == 0)
 		return -EINVAL;
 
 	unit = 1 << PHASE_STEP_SHIFT;
-	*out_phase = mult_frac(unit, src, dst);
+	*out_phase = mult_frac(src, unit, dst);
 
 	/* check if overflow is possible */
 	if (src > dst) {
-		residue = *out_phase - unit;
-		result = (residue * dst) + residue;
-
-		while (result > (unit + (unit >> 1)))
-			result -= unit;
-
-		if ((result > residue) && (result < unit))
+		residue = *out_phase & (unit - 1);
+		if (residue && ((residue * dst) < (unit - residue)))
 			return -EOVERFLOW;
 	}
 

@@ -1,4 +1,4 @@
-/* Copyright (c) 2012, 2014 The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -26,14 +26,11 @@ struct hdmi_hdcp_init_data {
 	struct dss_io_data *core_io;
 	struct dss_io_data *qfprom_io;
 	struct mutex *mutex;
-	struct kobject *sysfs_kobj;
 	struct workqueue_struct *workq;
 	void *cb_data;
 	void (*notify_status)(void *cb_data, enum hdmi_hdcp_state status);
 
 	struct hdmi_tx_ddc_ctrl *ddc_ctrl;
-
-	u32 phy_addr;
 };
 
 const char *hdcp_state_name(enum hdmi_hdcp_state hdcp_state);

@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -28,14 +28,15 @@
 #include <linux/uaccess.h>
 #include <linux/bootmem.h>
 #include <linux/dma-mapping.h>
-#include <linux/clk/msm-clk.h>
 
+#include <asm/system.h>
+#include <asm/mach-types.h>
 #include <linux/msm-sps.h>
+#include <linux/clk/msm-clk.h>
 #include <mach/hardware.h>
 
 #include "mdss_fb.h"
 #include "mdss_qpic.h"
-#include "mdss_qpic_panel.h"
 
 static int mdss_qpic_probe(struct platform_device *pdev);
 static int mdss_qpic_remove(struct platform_device *pdev);
@@ -69,19 +70,18 @@ static struct platform_driver mdss_qpic_driver = {
 int qpic_on(struct msm_fb_data_type *mfd)
 {
 	int ret;
-	ret = mdss_qpic_panel_on(qpic_res->panel_data, &qpic_res->panel_io);
+	ret = mdss_qpic_panel_on(qpic_res->panel_data);
 	return ret;
 }
 
 int qpic_off(struct msm_fb_data_type *mfd)
 {
 	int ret;
-	ret = mdss_qpic_panel_off(qpic_res->panel_data, &qpic_res->panel_io);
+	ret = mdss_qpic_panel_off(qpic_res->panel_data);
 	return ret;
 }
 
-static void mdss_qpic_pan_display(struct msm_fb_data_type *mfd,
-		struct mdp_overlay *req, int image_len, int *pipe_ndx)
+static void mdss_qpic_pan_display(struct msm_fb_data_type *mfd)
 {
 
 	struct fb_info *fbi;
@@ -106,7 +106,7 @@ static void mdss_qpic_pan_display(struct msm_fb_data_type *mfd,
 	}
 	fb_offset = (u32)fbi->fix.smem_start + offset;
 
-	mdss_qpic_panel_on(qpic_res->panel_data, &qpic_res->panel_io);
+	mdss_qpic_panel_on(qpic_res->panel_data);
 	size = fbi->var.xres * fbi->var.yres * bpp;
 
 	qpic_send_frame(0, 0, fbi->var.xres, fbi->var.yres,
@@ -134,29 +134,16 @@ int mdss_qpic_alloc_fb_mem(struct msm_fb_data_type *mfd)
 	if (!qpic_res->fb_virt) {
 		qpic_res->fb_virt = (void *)dmam_alloc_coherent(
 						&qpic_res->pdev->dev,
-						size,
+						size + QPIC_MAX_CMD_BUF_SIZE,
 						&qpic_res->fb_phys,
 						GFP_KERNEL);
-		pr_debug("%s size=%d vir_addr=%x phys_addr=%x",
+		pr_err("%s size=%d vir_addr=%x phys_addr=%x",
 			__func__, size, (int)qpic_res->fb_virt,
 			(int)qpic_res->fb_phys);
-		if (!qpic_res->fb_virt) {
-			pr_err("%s fb allocation failed", __func__);
+		if (!qpic_res->fb_virt)
 			return -ENOMEM;
-		}
-	}
-
-	if (!qpic_res->cmd_buf_virt) {
-		qpic_res->cmd_buf_virt = dma_alloc_writecombine(
-			NULL, QPIC_MAX_CMD_BUF_SIZE,
-			&qpic_res->cmd_buf_phys, GFP_KERNEL);
-		pr_debug("%s cmd_buf virt=%x phys=%x", __func__,
-			(int)qpic_res->cmd_buf_virt,
-			qpic_res->cmd_buf_phys);
-		if (!qpic_res->cmd_buf_virt) {
-			pr_err("%s cmd buf allocation failed", __func__);
-			return -ENOMEM;
-		}
+		qpic_res->cmd_buf_virt = qpic_res->fb_virt + size;
+		qpic_res->cmd_buf_phys = qpic_res->fb_phys + size;
 	}
 	mfd->fbi->fix.smem_start = qpic_res->fb_phys;
 	mfd->fbi->screen_base = qpic_res->fb_virt;
@@ -216,7 +203,7 @@ int qpic_init_sps(struct platform_device *pdev,
 	struct sps_connect *sps_config = &end_point->config;
 	struct sps_register_event *sps_event = &end_point->bam_event;
 	struct sps_bam_props bam = {0};
-	unsigned long bam_handle = 0;
+	u32 bam_handle = 0;
 
 	if (qpic_res->sps_init)
 		return 0;
@@ -353,6 +340,9 @@ int qpic_flush_buffer_bam(u32 cmd, u32 len, u32 *param, u32 is_cmd)
 	u32 phys_addr, cfg2, block_len , flags;
 	if (is_cmd) {
 		memcpy((u8 *)qpic_res->cmd_buf_virt, param, len);
+		invalidate_caches((unsigned long)qpic_res->cmd_buf_virt,
+		len,
+		(unsigned long)qpic_res->cmd_buf_phys);
 		phys_addr = qpic_res->cmd_buf_phys;
 	} else {
 		phys_addr = (u32)param;
@@ -378,7 +368,7 @@ int qpic_flush_buffer_bam(u32 cmd, u32 len, u32 *param, u32 is_cmd)
 		phys_addr += block_len;
 		len -= block_len;
 	}
-	ret = wait_for_completion_timeout(
+	ret = wait_for_completion_interruptible_timeout(
 		&qpic_res->qpic_endpt.completion,
 		msecs_to_jiffies(100 * 4));
 	if (ret <= 0)
@@ -595,8 +585,6 @@ static int mdss_qpic_probe(struct platform_device *pdev)
 
 	qpic_res->irq = res->start;
 	qpic_res->res_init = true;
-
-	mdss_qpic_panel_io_init(pdev, &qpic_res->panel_io);
 
 	rc = mdss_fb_register_mdp_instance(&qpic_interface);
 	if (rc)
