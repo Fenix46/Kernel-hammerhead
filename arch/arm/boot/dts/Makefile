@@ -89,6 +89,14 @@ dtb-$(CONFIG_ARCH_KIRKWOOD) += kirkwood-cloudbox.dtb \
 	kirkwood-ts219-6282.dtb \
 	kirkwood-openblocks_a6.dtb
 dtb-$(CONFIG_ARCH_MARCO) += marco-evb.dtb
+dtb-$(CONFIG_MACH_MSM8974_HAMMERHEAD) += msm8974-hammerhead-rev-f.dtb \
+        msm8974-hammerhead-rev-a.dtb \
+        msm8974-hammerhead-rev-bn.dtb \
+        msm8974-hammerhead-rev-b.dtb \
+        msm8974-hammerhead-rev-c.dtb \
+        msm8974-hammerhead-rev-10.dtb \
+        msm8974-hammerhead-rev-11.dtb \
+        msm8974-hammerhead-rev-11j.dtb
 dtb-$(CONFIG_ARCH_MVEBU) += armada-370-db.dtb \
 	armada-370-mirabox.dtb \
 	armada-370-rd.dtb \
