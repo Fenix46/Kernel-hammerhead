@@ -1,7 +1,7 @@
 /*
  * arch/arm/mach-msm/lge/device_lge.c
  *
- * Copyright (C) 2012,2013 LGE Inc.
+ * Copyright (C) 2012,2013 LGE, Inc
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -14,10 +14,11 @@
  */
 
 #include <linux/kernel.h>
-#include <linux/bug.h>
 #include <linux/string.h>
 #include <linux/platform_device.h>
 #include <linux/memblock.h>
+#include <linux/io.h>
+#include <linux/slab.h>
 #include <asm/setup.h>
 #include <asm/system_info.h>
 #include <mach/board_lge.h>
@@ -28,9 +29,9 @@
 #include <mach/lge_handle_panic.h>
 #endif
 
-static int uart_console_enabled = 0;
-
 #ifdef CONFIG_PSTORE_RAM
+#define LGE_RAM_CONSOLE_SIZE (128 * SZ_1K * 2)
+#define LGE_PERSISTENT_RAM_SIZE (SZ_1M)
 static char bootreason[128] = {0,};
 
 int __init lge_boot_reason(char *s)
@@ -45,7 +46,6 @@ __setup("bootreason=", lge_boot_reason);
 static struct ramoops_platform_data lge_ramoops_data = {
 	.mem_size     = LGE_PERSISTENT_RAM_SIZE,
 	.console_size = LGE_RAM_CONSOLE_SIZE,
-	.bootinfo     = bootreason,
 };
 
 static struct platform_device lge_ramoops_dev = {
@@ -63,19 +63,7 @@ static void __init lge_add_persist_ram_devices(void)
 
 	size = lge_ramoops_data.mem_size;
 
-	/* find a 1M section from highmem */
-	base = memblock_find_in_range(memblock.current_limit,
-			MEMBLOCK_ALLOC_ANYWHERE, size, SECTION_SIZE);
-	if (!base) {
-		/* find a 1M section from lowmem */
-		base = memblock_find_in_range(0,
-				MEMBLOCK_ALLOC_ACCESSIBLE,
-				size, SECTION_SIZE);
-		if (!base) {
-			pr_err("%s: not enough membank\n", __func__);
-			return;
-		}
-	}
+	base = 0x10000000;
 
 	pr_info("ramoops: reserved 1 MiB at 0x%08x\n", (int)base);
 
@@ -115,48 +103,88 @@ void __init lge_add_persistent_device(void)
 }
 #endif
 
-/* See include/mach/board_lge.h. CAUTION: These strings come from LK. */
-static char *rev_str[] = {"unknown", "evb1", "rev_a", "rev_b", "rev_c",
-	"rev_d", "rev_10", "rev_11"};
+/* setting whether uart console is enalbed or disabled */
+static unsigned int uart_console_mode = 1;  // Alway Off
 
-static int __init board_revno_setup(char *rev_info)
+unsigned int lge_get_uart_mode(void)
+{
+	return uart_console_mode;
+}
+
+void lge_set_uart_mode(unsigned int um)
+{
+	uart_console_mode = um;
+}
+
+static int __init lge_uart_mode(char *uart_mode)
+{
+	if (!strncmp("enable", uart_mode, 6)) {
+		printk(KERN_INFO"UART CONSOLE : enable\n");
+		lge_set_uart_mode((UART_MODE_ALWAYS_ON_BMSK | UART_MODE_EN_BMSK)
+				& ~UART_MODE_ALWAYS_OFF_BMSK);
+	} else {
+		printk(KERN_INFO"UART CONSOLE : disable\n");
+	}
+
+	return 1;
+}
+__setup("uart_console=", lge_uart_mode);
+
+/* get boot mode information from cmdline.
+ * If any boot mode is not specified,
+ * boot mode is normal type.
+ */
+static enum lge_boot_mode_type lge_boot_mode = LGE_BOOT_MODE_NORMAL;
+int __init lge_boot_mode_init(char *s)
+{
+	if (!strcmp(s, "charger"))
+		lge_boot_mode = LGE_BOOT_MODE_CHARGER;
+	else if (!strcmp(s, "chargerlogo"))
+		lge_boot_mode = LGE_BOOT_MODE_CHARGERLOGO;
+	else if (!strcmp(s, "factory"))
+		lge_boot_mode = LGE_BOOT_MODE_FACTORY;
+	else if (!strcmp(s, "factory2"))
+		lge_boot_mode = LGE_BOOT_MODE_FACTORY2;
+	else if (!strcmp(s, "pifboot"))
+		lge_boot_mode = LGE_BOOT_MODE_PIFBOOT;
+
+	return 1;
+}
+__setup("androidboot.mode=", lge_boot_mode_init);
+
+enum lge_boot_mode_type lge_get_boot_mode(void)
+{
+	return lge_boot_mode;
+}
+
+/* for board revision */
+static hw_rev_type lge_bd_rev = HW_REV_B;
+
+/* CAUTION: These strings are come from LK. */
+char *rev_str[] = {"evb1", "evb2", "rev_a", "rev_b", "rev_c", "rev_d",
+	"rev_e", "rev_f", "rev_g", "rev_h", "rev_10", "rev_11", "rev_12",
+	"revserved"};
+
+int __init board_revno_setup(char *rev_info)
 {
 	int i;
 
-	/* it is defined externally in <asm/system_info.h> */
-	system_rev = 0;
-
-	for (i = 0; i < ARRAY_SIZE(rev_str); i++) {
-		if (!strcmp(rev_info, rev_str[i])) {
-			system_rev = i;
+	for (i = 0; i < HW_REV_MAX; i++) {
+		if (!strncmp(rev_info, rev_str[i], 6)) {
+			lge_bd_rev = (hw_rev_type) i;
+			/* it is defined externally in <asm/system_info.h> */
+			system_rev = lge_bd_rev;
 			break;
 		}
 	}
 
-	pr_info("BOARD: LGE %s\n", rev_str[system_rev]);
+	printk(KERN_INFO "BOARD : LGE %s \n", rev_str[lge_bd_rev]);
 	return 1;
 }
 __setup("lge.rev=", board_revno_setup);
 
-int lge_get_board_revno(void)
+hw_rev_type lge_get_board_revno(void)
 {
-    return system_rev;
+    return lge_bd_rev;
 }
 
-int lge_uart_console_enabled(void)
-{
-	return uart_console_enabled;
-}
-
-static int __init uart_console_setup(char *str)
-{
-	if (str && !strncmp(str, "enable", 6))
-		uart_console_enabled = 1;
-
-	pr_info("UART CONSOLE: %s\n",
-			uart_console_enabled? "enabled" : "disabled");
-
-	return 1;
-}
-
-__setup("uart_console=", uart_console_setup);
