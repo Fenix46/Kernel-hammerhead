@@ -35,7 +35,8 @@ struct input_value {
 	__u16 code;
 	__s32 value;
 };
-
+#define SYN_TIME_SEC		4
+#define SYN_TIME_NSEC		5
 /**
  * struct input_dev - represents an input device
  * @name: name of the device
