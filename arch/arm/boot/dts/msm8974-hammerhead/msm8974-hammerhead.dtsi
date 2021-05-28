@@ -35,6 +35,11 @@
 	serial@f991d000 {
 		status = "ok";
 	};
+	
+	memory_hole: qcom,msm-mem-hole {
+		compatible = "qcom,msm-mem-hole";
+		qcom,memblock-remove = <0x7b00000 0x8400000>;
+	};
 
 	qcom,mdss_mdp@fd900000 {
 		qcom,mdss_fb_primary {
