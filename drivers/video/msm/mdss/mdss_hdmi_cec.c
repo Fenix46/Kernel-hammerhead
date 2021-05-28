@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010-2013, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -19,7 +19,6 @@
 
 #define CEC_STATUS_WR_ERROR	BIT(0)
 #define CEC_STATUS_WR_DONE	BIT(1)
-#define CEC_INTR		(BIT(1) | BIT(3) | BIT(7))
 
 /* Reference: HDMI 1.4a Specification section 7.1 */
 #define RETRANSMIT_MAX_NUM	5
@@ -124,7 +123,7 @@ static void hdmi_cec_disable(struct hdmi_cec_ctrl *cec_ctrl)
 
 	/* Disable CEC interrupts */
 	reg_val = DSS_REG_R(io, HDMI_CEC_INT);
-	DSS_REG_W(io, HDMI_CEC_INT, reg_val & ~CEC_INTR);
+	DSS_REG_W(io, HDMI_CEC_INT, reg_val & !BIT(1) & !BIT(3) & !BIT(7));
 
 	spin_lock_irqsave(&cec_ctrl->lock, flags);
 	list_for_each_entry_safe(msg_node, tmp, &cec_ctrl->msg_head, list) {
@@ -148,7 +147,7 @@ static void hdmi_cec_enable(struct hdmi_cec_ctrl *cec_ctrl)
 	INIT_LIST_HEAD(&cec_ctrl->msg_head);
 
 	/* Enable CEC interrupts */
-	DSS_REG_W(io, HDMI_CEC_INT, CEC_INTR);
+	DSS_REG_W(io, HDMI_CEC_INT, BIT(1) | BIT(3) | BIT(7));
 
 	/* Enable Engine */
 	DSS_REG_W(io, HDMI_CEC_CTRL, BIT(0));
@@ -351,8 +350,7 @@ static int hdmi_cec_msg_send(struct hdmi_cec_ctrl *cec_ctrl,
 			(msg->operand[i] << 8) | frame_type);
 
 	while ((DSS_REG_R(io, HDMI_CEC_STATUS) & BIT(0)) &&
-		line_check_retry) {
-		line_check_retry--;
+		line_check_retry--) {
 		DEV_DBG("%s: CEC line is busy(%d)\n", __func__,
 			line_check_retry);
 		schedule();
@@ -367,7 +365,7 @@ static int hdmi_cec_msg_send(struct hdmi_cec_ctrl *cec_ctrl,
 	DSS_REG_W(io, HDMI_CEC_CTRL, BIT(0) | BIT(1) |
 		((msg->frame_size & 0x1F) << 4) | BIT(9));
 
-	if (!wait_for_completion_timeout(
+	if (!wait_for_completion_interruptible_timeout(
 		&cec_ctrl->cec_msg_wr_done, HZ)) {
 		DEV_ERR("%s: timedout", __func__);
 		hdmi_cec_dump_msg(cec_ctrl, msg);
@@ -876,7 +874,7 @@ int hdmi_cec_config(void *input)
 	DSS_REG_W(io, HDMI_CEC_REFTIMER, (0x3B6 & 0xFFF) | BIT(16));
 
 	hdmi_hw_version = DSS_REG_R(io, HDMI_VERSION);
-	if (hdmi_hw_version >= 0x30000001) {
+	if (hdmi_hw_version == 0x30000001) {
 		DSS_REG_W(io, HDMI_CEC_RD_RANGE, 0x30AB9888);
 		DSS_REG_W(io, HDMI_CEC_WR_RANGE, 0x888AA888);
 
