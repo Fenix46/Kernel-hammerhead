@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -18,13 +18,15 @@
 
 #define VSYNC_EXPIRE_TICK 4
 
+#define START_THRESHOLD 4
+#define CONTINUE_THRESHOLD 4
+
 #define MAX_SESSIONS 2
 
 /* wait for at most 2 vsync for lowest refresh rate (24hz) */
 #define KOFF_TIMEOUT msecs_to_jiffies(84)
 
 #define STOP_TIMEOUT msecs_to_jiffies(16 * (VSYNC_EXPIRE_TICK + 2))
-#define ULPS_ENTER_TIME msecs_to_jiffies(100)
 
 struct mdss_mdp_cmd_ctx {
 	struct mdss_mdp_ctl *ctl;
@@ -41,12 +43,15 @@ struct mdss_mdp_cmd_ctx {
 	struct mutex clk_mtx;
 	spinlock_t clk_lock;
 	struct work_struct clk_work;
-	struct delayed_work ulps_work;
 	struct work_struct pp_done_work;
 	atomic_t pp_done_cnt;
-	struct mdss_panel_recovery recovery;
-	bool ulps;
-	bool off_pan_on;
+
+	/* te config */
+	u8 tear_check;
+	u16 height;	/* panel height */
+	u16 vporch;	/* vertical porches */
+	u16 start_threshold;
+	u32 vclk_line;	/* vsync clock per line */
 };
 
 struct mdss_mdp_cmd_ctx mdss_mdp_cmd_ctx_list[MAX_SESSIONS];
@@ -57,6 +62,9 @@ static inline u32 mdss_mdp_cmd_line_count(struct mdss_mdp_ctl *ctl)
 	u32 cnt = 0xffff;	/* init it to an invalid value */
 	u32 init;
 	u32 height;
+
+	if (!ctl)
+		goto exit;
 
 	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON, false);
 
@@ -95,92 +103,101 @@ exit:
 	return cnt;
 }
 
-
-static int mdss_mdp_cmd_tearcheck_cfg(struct mdss_mdp_ctl *ctl,
-				      struct mdss_mdp_mixer *mixer)
+/*
+ * TE configuration:
+ * dsi byte clock calculated base on 70 fps
+ * around 14 ms to complete a kickoff cycle if te disabled
+ * vclk_line base on 60 fps
+ * write is faster than read
+ * init == start == rdptr
+ */
+static int mdss_mdp_cmd_tearcheck_cfg(struct mdss_mdp_mixer *mixer,
+			struct mdss_mdp_cmd_ctx *ctx, int enable)
 {
-	struct mdss_mdp_pp_tear_check *te;
-	struct mdss_panel_info *pinfo;
-	u32 vsync_clk_speed_hz, total_lines, vclks_line, cfg;
+	u32 cfg;
 
-	if (IS_ERR_OR_NULL(ctl->panel_data)) {
-		pr_err("no panel data\n");
-		return -ENODEV;
-	}
-
-	pinfo = &ctl->panel_data->panel_info;
-	te = &ctl->panel_data->panel_info.te;
-
-	mdss_mdp_vsync_clk_enable(1);
-
-	vsync_clk_speed_hz =
-		mdss_mdp_get_clk_rate(MDSS_CLK_MDP_VSYNC);
-
-	total_lines = mdss_panel_get_vtotal(pinfo);
-
-	total_lines *= pinfo->mipi.frame_rate;
-
-	vclks_line = (total_lines) ? vsync_clk_speed_hz / total_lines : 0;
-
-	cfg = BIT(19);
-	if (pinfo->mipi.hw_vsync_mode)
-		cfg |= BIT(20);
-
-	if (te->refx100)
-		vclks_line = vclks_line * pinfo->mipi.frame_rate *
-			100 / te->refx100;
-	else {
-		pr_warn("refx100 cannot be zero! Use 6000 as default\n");
-		vclks_line = vclks_line * pinfo->mipi.frame_rate *
-			100 / 6000;
-	}
-
-	cfg |= vclks_line;
-
-	pr_debug("%s: yres=%d vclks=%x height=%d init=%d rd=%d start=%d ",
-		__func__, pinfo->yres, vclks_line, te->sync_cfg_height,
-		 te->vsync_init_val, te->rd_ptr_irq, te->start_pos);
-	pr_debug("thrd_start =%d thrd_cont=%d\n",
-		te->sync_threshold_start, te->sync_threshold_continue);
+	cfg = BIT(19); /* VSYNC_COUNTER_EN */
+	if (ctx->tear_check)
+		cfg |= BIT(20);	/* VSYNC_IN_EN */
+	cfg |= ctx->vclk_line;
 
 	mdss_mdp_pingpong_write(mixer, MDSS_MDP_REG_PP_SYNC_CONFIG_VSYNC, cfg);
 	mdss_mdp_pingpong_write(mixer, MDSS_MDP_REG_PP_SYNC_CONFIG_HEIGHT,
-				te->sync_cfg_height);
+				0xfff0); /* set to verh height */
+
 	mdss_mdp_pingpong_write(mixer, MDSS_MDP_REG_PP_VSYNC_INIT_VAL,
-				te->vsync_init_val);
+						ctx->height);
+
 	mdss_mdp_pingpong_write(mixer, MDSS_MDP_REG_PP_RD_PTR_IRQ,
-				te->rd_ptr_irq);
+						ctx->height + 1);
+
 	mdss_mdp_pingpong_write(mixer, MDSS_MDP_REG_PP_START_POS,
-				te->start_pos);
+						ctx->height);
+
 	mdss_mdp_pingpong_write(mixer, MDSS_MDP_REG_PP_SYNC_THRESH,
-				((te->sync_threshold_continue << 16) |
-				 te->sync_threshold_start));
-	mdss_mdp_pingpong_write(mixer, MDSS_MDP_REG_PP_TEAR_CHECK_EN,
-				te->tear_check_en);
+		   (CONTINUE_THRESHOLD << 16) | (ctx->start_threshold));
+
+	mdss_mdp_pingpong_write(mixer, MDSS_MDP_REG_PP_TEAR_CHECK_EN, enable);
 	return 0;
 }
 
-static int mdss_mdp_cmd_tearcheck_setup(struct mdss_mdp_ctl *ctl)
+static int mdss_mdp_cmd_tearcheck_setup(struct mdss_mdp_ctl *ctl, int enable)
 {
+	struct mdss_mdp_cmd_ctx *ctx = ctl->priv_data;
+	struct mdss_panel_info *pinfo;
 	struct mdss_mdp_mixer *mixer;
-	int rc = 0;
-	mixer = mdss_mdp_mixer_get(ctl, MDSS_MDP_MIXER_MUX_LEFT);
-	if (mixer) {
-		rc = mdss_mdp_cmd_tearcheck_cfg(ctl, mixer);
-		if (rc)
-			goto err;
+
+	pinfo = &ctl->panel_data->panel_info;
+
+	if (pinfo->mipi.vsync_enable && enable) {
+		u32 mdp_vsync_clk_speed_hz, total_lines;
+
+		mdss_mdp_vsync_clk_enable(1);
+
+		mdp_vsync_clk_speed_hz =
+		mdss_mdp_get_clk_rate(MDSS_CLK_MDP_VSYNC);
+		pr_debug("%s: vsync_clk_rate=%d\n", __func__,
+					mdp_vsync_clk_speed_hz);
+
+		if (mdp_vsync_clk_speed_hz == 0) {
+			pr_err("can't get clk speed\n");
+			return -EINVAL;
+		}
+
+		ctx->tear_check = pinfo->mipi.hw_vsync_mode;
+		ctx->height = pinfo->yres;
+		ctx->vporch = pinfo->lcdc.v_back_porch +
+				    pinfo->lcdc.v_front_porch +
+				    pinfo->lcdc.v_pulse_width;
+
+		ctx->start_threshold = START_THRESHOLD;
+
+		total_lines = ctx->height + ctx->vporch;
+		total_lines *= pinfo->mipi.frame_rate;
+		ctx->vclk_line = mdp_vsync_clk_speed_hz / total_lines;
+
+		pr_debug("%s: fr=%d tline=%d vcnt=%d thold=%d vrate=%d\n",
+			__func__, pinfo->mipi.frame_rate, total_lines,
+				ctx->vclk_line, ctx->start_threshold,
+				mdp_vsync_clk_speed_hz);
+	} else {
+		enable = 0;
 	}
+
+	mixer = mdss_mdp_mixer_get(ctl, MDSS_MDP_MIXER_MUX_LEFT);
+	if (mixer)
+		mdss_mdp_cmd_tearcheck_cfg(mixer, ctx, enable);
+
 	mixer = mdss_mdp_mixer_get(ctl, MDSS_MDP_MIXER_MUX_RIGHT);
 	if (mixer)
-		rc = mdss_mdp_cmd_tearcheck_cfg(ctl, mixer);
- err:
-	return rc;
+		mdss_mdp_cmd_tearcheck_cfg(mixer, ctx, enable);
+
+	return 0;
 }
 
 static inline void mdss_mdp_cmd_clk_on(struct mdss_mdp_cmd_ctx *ctx)
 {
 	unsigned long flags;
-	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
 
 	if (!ctx->panel_on)
 		return;
@@ -188,29 +205,9 @@ static inline void mdss_mdp_cmd_clk_on(struct mdss_mdp_cmd_ctx *ctx)
 	mutex_lock(&ctx->clk_mtx);
 	if (!ctx->clk_enabled) {
 		ctx->clk_enabled = 1;
-		ctx->off_pan_on = false;
-		if (cancel_delayed_work_sync(&ctx->ulps_work))
-			pr_debug("deleted pending ulps work\n");
-
-		if (ctx->ulps) {
-			mdss_mdp_footswitch_ctrl_ulps(1,
-				&ctx->ctl->mfd->pdev->dev);
-			mdss_mdp_ctl_restore(ctx->ctl);
-			mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON, false);
-
-			if (mdss_mdp_cmd_tearcheck_setup(ctx->ctl))
-				pr_warn("tearcheck setup failed\n");
-			mdss_mdp_ctl_intf_event(ctx->ctl,
-				MDSS_EVENT_DSI_ULPS_CTRL, (void *)0);
-			ctx->ulps = false;
-		} else {
-			mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON, false);
-		}
-
 		mdss_mdp_ctl_intf_event
 			(ctx->ctl, MDSS_EVENT_PANEL_CLK_CTRL, (void *)1);
-
-		mdss_mdp_hist_intr_setup(&mdata->hist_intr, MDSS_IRQ_RESUME);
+		mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON, false);
 	}
 	spin_lock_irqsave(&ctx->clk_lock, flags);
 	if (!ctx->rdptr_enabled)
@@ -223,7 +220,6 @@ static inline void mdss_mdp_cmd_clk_on(struct mdss_mdp_cmd_ctx *ctx)
 static inline void mdss_mdp_cmd_clk_off(struct mdss_mdp_cmd_ctx *ctx)
 {
 	unsigned long flags;
-	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
 	int set_clk_off = 0;
 
 	mutex_lock(&ctx->clk_mtx);
@@ -234,12 +230,9 @@ static inline void mdss_mdp_cmd_clk_off(struct mdss_mdp_cmd_ctx *ctx)
 
 	if (ctx->clk_enabled && set_clk_off) {
 		ctx->clk_enabled = 0;
-		mdss_mdp_hist_intr_setup(&mdata->hist_intr, MDSS_IRQ_SUSPEND);
 		mdss_mdp_ctl_intf_event
 			(ctx->ctl, MDSS_EVENT_PANEL_CLK_CTRL, (void *)0);
 		mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF, false);
-		if (ctx->panel_on && !ctx->off_pan_on)
-			schedule_delayed_work(&ctx->ulps_work, ULPS_ENTER_TIME);
 	}
 	mutex_unlock(&ctx->clk_mtx);
 }
@@ -284,31 +277,6 @@ static void mdss_mdp_cmd_readptr_done(void *arg)
 	spin_unlock(&ctx->clk_lock);
 }
 
-static void mdss_mdp_cmd_underflow_recovery(void *data)
-{
-	struct mdss_mdp_cmd_ctx *ctx = data;
-	unsigned long flags;
-
-	if (!data) {
-		pr_err("%s: invalid ctx\n", __func__);
-		return;
-	}
-
-	if (!ctx->ctl)
-		return;
-	spin_lock_irqsave(&ctx->clk_lock, flags);
-	if (ctx->koff_cnt) {
-		mdss_mdp_ctl_reset(ctx->ctl);
-		pr_debug("%s: intf_num=%d\n", __func__,
-					ctx->ctl->intf_num);
-		ctx->koff_cnt--;
-		mdss_mdp_irq_disable_nosync(MDSS_MDP_IRQ_PING_PONG_COMP,
-						ctx->pp_num);
-		complete_all(&ctx->pp_comp);
-	}
-	spin_unlock_irqrestore(&ctx->clk_lock, flags);
-}
-
 static void mdss_mdp_cmd_pingpong_done(void *arg)
 {
 	struct mdss_mdp_ctl *ctl = arg;
@@ -320,9 +288,6 @@ static void mdss_mdp_cmd_pingpong_done(void *arg)
 		pr_err("%s: invalid ctx\n", __func__);
 		return;
 	}
-
-	mdss_mdp_ctl_perf_set_transaction_status(ctl,
-		PERF_HW_MDP_STATE, PERF_STATUS_DONE);
 
 	spin_lock(&ctx->clk_lock);
 	list_for_each_entry(tmp, &ctx->vsync_handlers, list) {
@@ -356,12 +321,9 @@ static void pingpong_done_work(struct work_struct *work)
 	struct mdss_mdp_cmd_ctx *ctx =
 		container_of(work, typeof(*ctx), pp_done_work);
 
-	if (ctx->ctl) {
+	if (ctx->ctl)
 		while (atomic_add_unless(&ctx->pp_done_cnt, -1, 0))
 			mdss_mdp_ctl_notify(ctx->ctl, MDP_NOTIFY_FRAME_DONE);
-
-		mdss_mdp_ctl_perf_release_bw(ctx->ctl);
-	}
 }
 
 static void clk_ctrl_work(struct work_struct *work)
@@ -375,30 +337,6 @@ static void clk_ctrl_work(struct work_struct *work)
 	}
 
 	mdss_mdp_cmd_clk_off(ctx);
-}
-
-static void __mdss_mdp_cmd_ulps_work(struct work_struct *work)
-{
-	struct delayed_work *dw = to_delayed_work(work);
-	struct mdss_mdp_cmd_ctx *ctx =
-		container_of(dw, struct mdss_mdp_cmd_ctx, ulps_work);
-
-	if (!ctx) {
-		pr_err("%s: invalid ctx\n", __func__);
-		return;
-	}
-
-	if (!ctx->panel_on) {
-		pr_err("Panel is off. skipping ULPS configuration\n");
-		return;
-	}
-
-	if (!mdss_mdp_ctl_intf_event(ctx->ctl, MDSS_EVENT_DSI_ULPS_CTRL,
-		(void *)1)) {
-		ctx->ulps = true;
-		ctx->ctl->play_cnt = 0;
-		mdss_mdp_footswitch_ctrl_ulps(0, &ctx->ctl->mfd->pdev->dev);
-	}
 }
 
 static int mdss_mdp_cmd_add_vsync_handler(struct mdss_mdp_ctl *ctl,
@@ -459,7 +397,7 @@ static int mdss_mdp_cmd_remove_vsync_handler(struct mdss_mdp_ctl *ctl,
 	return 0;
 }
 
-int mdss_mdp_cmd_reconfigure_splash_done(struct mdss_mdp_ctl *ctl, bool handoff)
+int mdss_mdp_cmd_reconfigure_splash_done(struct mdss_mdp_ctl *ctl)
 {
 	struct mdss_panel_data *pdata;
 	int ret = 0;
@@ -468,7 +406,11 @@ int mdss_mdp_cmd_reconfigure_splash_done(struct mdss_mdp_ctl *ctl, bool handoff)
 
 	pdata->panel_info.cont_splash_enabled = 0;
 
+	ret = mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_CONT_SPLASH_FINISH,
+			NULL);
+
 	mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_PANEL_CLK_CTRL, (void *)0);
+	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF, false);
 
 	return ret;
 }
@@ -479,6 +421,7 @@ static int mdss_mdp_cmd_wait4pingpong(struct mdss_mdp_ctl *ctl, void *arg)
 	unsigned long flags;
 	int need_wait = 0;
 	int rc = 0;
+	int flush_wq = (int) arg;
 
 	ctx = (struct mdss_mdp_cmd_ctx *) ctl->priv_data;
 	if (!ctx) {
@@ -499,21 +442,6 @@ static int mdss_mdp_cmd_wait4pingpong(struct mdss_mdp_ctl *ctl, void *arg)
 				&ctx->pp_comp, KOFF_TIMEOUT);
 
 		if (rc <= 0) {
-			u32 status, mask;
-
-			mask = BIT(MDSS_MDP_IRQ_PING_PONG_COMP + ctx->pp_num);
-			status = mask & readl_relaxed(ctl->mdata->mdp_base +
-					MDSS_MDP_REG_INTR_STATUS);
-			writel_relaxed(mask, ctl->mdata->mdp_base +
-					MDSS_MDP_REG_INTR_CLEAR);
-
-			if (status || try_wait_for_completion(&ctx->pp_comp)) {
-				WARN(status, "pp done but irq not triggered\n");
-				rc = 1;
-			}
-		}
-
-		if (rc <= 0) {
 			WARN(1, "cmd kickoff timed out (%d) ctl=%d\n",
 						rc, ctl->num);
 			rc = -EPERM;
@@ -523,22 +451,9 @@ static int mdss_mdp_cmd_wait4pingpong(struct mdss_mdp_ctl *ctl, void *arg)
 		}
 	}
 
-	return rc;
-}
+	if (flush_wq)
+		flush_work(&ctx->pp_done_work);
 
-static int mdss_mdp_cmd_set_partial_roi(struct mdss_mdp_ctl *ctl)
-{
-	int rc = 0;
-	if (ctl->roi.w && ctl->roi.h && ctl->roi_changed &&
-			ctl->panel_data->panel_info.partial_update_enabled) {
-		ctl->panel_data->panel_info.roi_x = ctl->roi.x;
-		ctl->panel_data->panel_info.roi_y = ctl->roi.y;
-		ctl->panel_data->panel_info.roi_w = ctl->roi.w;
-		ctl->panel_data->panel_info.roi_h = ctl->roi.h;
-
-		rc = mdss_mdp_ctl_intf_event(ctl,
-				MDSS_EVENT_ENABLE_PARTIAL_UPDATE, NULL);
-	}
 	return rc;
 }
 
@@ -553,9 +468,6 @@ int mdss_mdp_cmd_kickoff(struct mdss_mdp_ctl *ctl, void *arg)
 		pr_err("invalid ctx\n");
 		return -ENODEV;
 	}
-
-	mdss_mdp_ctl_perf_set_transaction_status(ctl,
-		PERF_HW_MDP_STATE, PERF_STATUS_BUSY);
 
 	if (ctx->panel_on == 0) {
 		rc = mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_UNBLANK, NULL);
@@ -573,90 +485,14 @@ int mdss_mdp_cmd_kickoff(struct mdss_mdp_ctl *ctl, void *arg)
 
 	mdss_mdp_cmd_clk_on(ctx);
 
-	mdss_mdp_cmd_set_partial_roi(ctl);
-
 	/*
 	 * tx dcs command if had any
 	 */
-	mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_DSI_CMDLIST_KOFF,
-						(void *)&ctx->recovery);
+	mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_DSI_CMDLIST_KOFF, NULL);
 	INIT_COMPLETION(ctx->pp_comp);
 	mdss_mdp_irq_enable(MDSS_MDP_IRQ_PING_PONG_COMP, ctx->pp_num);
 	mdss_mdp_ctl_write(ctl, MDSS_MDP_REG_CTL_START, 1);
-
-	mdss_mdp_ctl_perf_set_transaction_status(ctl,
-		PERF_SW_COMMIT_STATE, PERF_STATUS_DONE);
-
 	mb();
-
-	return 0;
-}
-
-int mdss_mdp_cmd_off_pan_on(struct mdss_mdp_ctl *ctl)
-{
-	struct mdss_mdp_cmd_ctx *ctx;
-	struct mdss_panel_info *pinfo;
-	unsigned long flags;
-	int need_wait = 0;
-
-	ctx = (struct mdss_mdp_cmd_ctx *) ctl->priv_data;
-	if (!ctx) {
-		pr_err("invalid ctx\n");
-		return -ENODEV;
-	}
-
-	pinfo = &ctl->panel_data->panel_info;
-
-	pr_debug("%s: clk_enabled=%d\n", __func__, ctx->clk_enabled);
-
-	spin_lock_irqsave(&ctx->clk_lock, flags);
-	if (ctx->rdptr_enabled) {
-		INIT_COMPLETION(ctx->stop_comp);
-		need_wait = 1;
-	}
-	spin_unlock_irqrestore(&ctx->clk_lock, flags);
-
-	if (need_wait) {
-		int idle = 0;
-		unsigned long timeout = STOP_TIMEOUT;
-
-		if (ctl->panel_data->get_idle)
-			idle = ctl->panel_data->get_idle(ctl->panel_data);
-
-		if (idle)
-			timeout = msecs_to_jiffies(pinfo->idle_ms_per_frame *
-					(VSYNC_EXPIRE_TICK + 2));
-
-		if (wait_for_completion_timeout(&ctx->stop_comp, timeout)
-		    <= 0) {
-			pr_debug("%s: stop cmd time out\n", __func__);
-			mdss_mdp_irq_disable(MDSS_MDP_IRQ_PING_PONG_RD_PTR,
-				ctx->pp_num);
-			ctx->rdptr_enabled = 0;
-			ctx->koff_cnt = 0;
-		}
-	}
-
-	ctx->off_pan_on = true;
-	if (cancel_work_sync(&ctx->clk_work))
-		pr_debug("no pending clk work\n");
-
-	if (cancel_delayed_work_sync(&ctx->ulps_work))
-		pr_debug("deleted pending ulps work\n");
-
-	mdss_mdp_cmd_clk_off(ctx);
-
-	if (!ctx->ulps) {
-		pr_debug("%s: forcing ulps with panel always on feature\n",
-			__func__);
-		if (!mdss_mdp_ctl_intf_event(ctx->ctl,
-			MDSS_EVENT_DSI_ULPS_CTRL, (void *)1)) {
-			ctx->ulps = true;
-			ctx->ctl->play_cnt = 0;
-			mdss_mdp_footswitch_ctrl_ulps(0,
-				&ctx->ctl->mfd->pdev->dev);
-		}
-	}
 
 	return 0;
 }
@@ -664,7 +500,6 @@ int mdss_mdp_cmd_off_pan_on(struct mdss_mdp_ctl *ctl)
 int mdss_mdp_cmd_stop(struct mdss_mdp_ctl *ctl)
 {
 	struct mdss_mdp_cmd_ctx *ctx;
-	struct mdss_panel_info *pinfo;
 	unsigned long flags;
 	struct mdss_mdp_vsync_handler *tmp, *handle;
 	int need_wait = 0;
@@ -676,12 +511,8 @@ int mdss_mdp_cmd_stop(struct mdss_mdp_ctl *ctl)
 		return -ENODEV;
 	}
 
-	pinfo = &ctl->panel_data->panel_info;
-
-	list_for_each_entry_safe(handle, tmp, &ctx->vsync_handlers, list) {
-		list_add(&handle->saved_list, &ctl->saved_vsync_handlers);
+	list_for_each_entry_safe(handle, tmp, &ctx->vsync_handlers, list)
 		mdss_mdp_cmd_remove_vsync_handler(ctl, handle);
-	}
 
 	spin_lock_irqsave(&ctx->clk_lock, flags);
 	if (ctx->rdptr_enabled) {
@@ -690,38 +521,21 @@ int mdss_mdp_cmd_stop(struct mdss_mdp_ctl *ctl)
 	}
 	spin_unlock_irqrestore(&ctx->clk_lock, flags);
 
-	if (need_wait) {
-		int idle = 0;
-		unsigned long timeout = STOP_TIMEOUT;
-
-		if (ctl->panel_data->get_idle)
-			idle = ctl->panel_data->get_idle(ctl->panel_data);
-
-		if (idle)
-			timeout = msecs_to_jiffies(pinfo->idle_ms_per_frame *
-					(VSYNC_EXPIRE_TICK + 2));
-
-		if (wait_for_completion_timeout(&ctx->stop_comp, timeout)
-		    <= 0) {
+	if (need_wait)
+		if (wait_for_completion_timeout(&ctx->stop_comp, STOP_TIMEOUT)
+		    <= 0)
 			WARN(1, "stop cmd time out\n");
-			mdss_mdp_irq_disable
-				(MDSS_MDP_IRQ_PING_PONG_RD_PTR,
-						ctx->pp_num);
-			ctx->rdptr_enabled = 0;
-		}
-	}
 
 	if (cancel_work_sync(&ctx->clk_work))
 		pr_debug("no pending clk work\n");
 
-	if (cancel_delayed_work_sync(&ctx->ulps_work))
-		pr_debug("deleted pending ulps work\n");
+	mdss_mdp_cmd_wait4pingpong(ctl, NULL);
 
-	ctx->panel_on = 0;
 	mdss_mdp_cmd_clk_off(ctx);
 
 	flush_work(&ctx->pp_done_work);
 
+	ctx->panel_on = 0;
 
 	mdss_mdp_set_intr_callback(MDSS_MDP_IRQ_PING_PONG_RD_PTR, ctx->pp_num,
 				   NULL, NULL);
@@ -731,13 +545,11 @@ int mdss_mdp_cmd_stop(struct mdss_mdp_ctl *ctl)
 	memset(ctx, 0, sizeof(*ctx));
 	ctl->priv_data = NULL;
 
-	if (ctl->num == 0) {
-		ret = mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_BLANK, NULL);
-		WARN(ret, "intf %d unblank error (%d)\n", ctl->intf_num, ret);
+	ret = mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_BLANK, NULL);
+	WARN(ret, "intf %d blank error (%d)\n", ctl->intf_num, ret);
 
-		ret = mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_PANEL_OFF, NULL);
-		WARN(ret, "intf %d unblank error (%d)\n", ctl->intf_num, ret);
-	}
+	ret = mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_PANEL_OFF, NULL);
+	WARN(ret, "intf %d panel off error (%d)\n", ctl->intf_num, ret);
 
 	ctl->stop_fnc = NULL;
 	ctl->display_fnc = NULL;
@@ -754,7 +566,6 @@ int mdss_mdp_cmd_start(struct mdss_mdp_ctl *ctl)
 {
 	struct mdss_mdp_cmd_ctx *ctx;
 	struct mdss_mdp_mixer *mixer;
-	struct mdss_mdp_vsync_handler *tmp, *handle;
 	int i, ret;
 
 	pr_debug("%s:+\n", __func__);
@@ -790,17 +601,9 @@ int mdss_mdp_cmd_start(struct mdss_mdp_ctl *ctl)
 	spin_lock_init(&ctx->clk_lock);
 	mutex_init(&ctx->clk_mtx);
 	INIT_WORK(&ctx->clk_work, clk_ctrl_work);
-	INIT_DELAYED_WORK(&ctx->ulps_work, __mdss_mdp_cmd_ulps_work);
 	INIT_WORK(&ctx->pp_done_work, pingpong_done_work);
 	atomic_set(&ctx->pp_done_cnt, 0);
 	INIT_LIST_HEAD(&ctx->vsync_handlers);
-	list_for_each_entry_safe(handle, tmp, &ctl->saved_vsync_handlers, saved_list) {
-		mdss_mdp_cmd_add_vsync_handler(ctl, handle);
-		list_del_init(&handle->saved_list);
-	}
-
-	ctx->recovery.fxn = mdss_mdp_cmd_underflow_recovery;
-	ctx->recovery.data = ctx;
 
 	pr_debug("%s: ctx=%p num=%d mixer=%d\n", __func__,
 				ctx, ctx->pp_num, mixer->num);
@@ -811,8 +614,7 @@ int mdss_mdp_cmd_start(struct mdss_mdp_ctl *ctl)
 	mdss_mdp_set_intr_callback(MDSS_MDP_IRQ_PING_PONG_COMP, ctx->pp_num,
 				   mdss_mdp_cmd_pingpong_done, ctl);
 
-	ret = mdss_mdp_cmd_tearcheck_setup(ctl);
-
+	ret = mdss_mdp_cmd_tearcheck_setup(ctl, 1);
 	if (ret) {
 		pr_err("tearcheck setup failed\n");
 		return ret;
@@ -824,7 +626,6 @@ int mdss_mdp_cmd_start(struct mdss_mdp_ctl *ctl)
 	ctl->add_vsync_handler = mdss_mdp_cmd_add_vsync_handler;
 	ctl->remove_vsync_handler = mdss_mdp_cmd_remove_vsync_handler;
 	ctl->read_line_cnt_fnc = mdss_mdp_cmd_line_count;
-	ctl->off_pan_on = mdss_mdp_cmd_off_pan_on;
 	pr_debug("%s:-\n", __func__);
 
 	return 0;
