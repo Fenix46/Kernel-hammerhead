@@ -95,14 +95,14 @@ dtb-$(CONFIG_MACH_DORY) += apq8026-dory-rev-11.dtb \
 	apq8026-dory-rev-b.dtb \
 	apq8026-dory-rev-a.dtb \
 	apq8026-dory-lunchbox.dtb
-dtb-$(CONFIG_MACH_MSM8974_HAMMERHEAD) += msm8974-hammerhead-rev-11.dtb \
-        msm8974-hammerhead-rev-11j.dtb \
-        msm8974-hammerhead-rev-10.dtb \
-        msm8974-hammerhead-rev-c.dtb \
-        msm8974-hammerhead-rev-b.dtb \
-        msm8974-hammerhead-rev-bn.dtb \
+dtb-$(CONFIG_MACH_MSM8974_HAMMERHEAD) += msm8974-hammerhead-rev-f.dtb \
         msm8974-hammerhead-rev-a.dtb \
-        msm8974-hammerhead-rev-f.dtb
+        msm8974-hammerhead-rev-bn.dtb \
+        msm8974-hammerhead-rev-b.dtb \
+        msm8974-hammerhead-rev-c.dtb \
+        msm8974-hammerhead-rev-10.dtb \
+        msm8974-hammerhead-rev-11j.dtb \
+        msm8974-hammerhead-rev-11.dtb
 dtb-$(CONFIG_ARCH_MVEBU) += armada-370-db.dtb \
 	armada-370-mirabox.dtb \
 	armada-370-rd.dtb \
