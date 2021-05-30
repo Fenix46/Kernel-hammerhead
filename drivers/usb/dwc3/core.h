@@ -975,52 +975,16 @@ int dwc3_gadget_resize_tx_fifos(struct dwc3 *dwc);
 int dwc3_otg_init(struct dwc3 *dwc);
 void dwc3_otg_exit(struct dwc3 *dwc);
 
-#if IS_ENABLED(CONFIG_USB_DWC3_HOST) || IS_ENABLED(CONFIG_USB_DWC3_DUAL_ROLE)
 int dwc3_host_init(struct dwc3 *dwc);
 void dwc3_host_exit(struct dwc3 *dwc);
-#else
-static inline int dwc3_host_init(struct dwc3 *dwc)
-{ return 0; }
-static inline void dwc3_host_exit(struct dwc3 *dwc)
-{ }
-#endif
 
-#if IS_ENABLED(CONFIG_USB_DWC3_GADGET) || IS_ENABLED(CONFIG_USB_DWC3_DUAL_ROLE)
 int dwc3_gadget_init(struct dwc3 *dwc);
 void dwc3_gadget_exit(struct dwc3 *dwc);
-#else
-static inline int dwc3_gadget_init(struct dwc3 *dwc)
-{ return 0; }
-static inline void dwc3_gadget_exit(struct dwc3 *dwc)
-{ }
-#endif
 
-/* power management interface */
-#if !IS_ENABLED(CONFIG_USB_DWC3_HOST)
 int dwc3_gadget_prepare(struct dwc3 *dwc);
 void dwc3_gadget_complete(struct dwc3 *dwc);
 int dwc3_gadget_suspend(struct dwc3 *dwc);
 int dwc3_gadget_resume(struct dwc3 *dwc);
-#else
-static inline int dwc3_gadget_prepare(struct dwc3 *dwc)
-{
-	return 0;
-}
-
-static inline void dwc3_gadget_complete(struct dwc3 *dwc)
-{
-}
-
-static inline int dwc3_gadget_suspend(struct dwc3 *dwc)
-{
-	return 0;
-}
-
-static inline int dwc3_gadget_resume(struct dwc3 *dwc)
-{
-	return 0;
-}
-#endif /* !IS_ENABLED(CONFIG_USB_DWC3_HOST) */
 
 void dwc3_gadget_restart(struct dwc3 *dwc);
 void dwc3_post_host_reset_core_init(struct dwc3 *dwc);
