@@ -49,8 +49,9 @@
 #include <linux/wakelock.h>
 #include <linux/types.h>
 #include <asm/byteorder.h>
-#include <linux/platform_data/qcom-serial_hs_lite.h>
-#include <linux/msm-bus.h>
+#include <mach/board.h>
+#include <mach/msm_serial_hs_lite.h>
+#include <mach/msm_bus.h>
 #include "msm_serial_hs_hwreg.h"
 
 /*
@@ -84,7 +85,7 @@ struct msm_hsl_port {
 	unsigned int            *gsbi_mapbase;
 	unsigned int            *mapped_gsbi;
 	unsigned int            old_snap_state;
-	unsigned long		ver_id;
+	unsigned int		ver_id;
 	int			tx_timeout;
 	struct mutex		clk_mutex;
 	enum uart_core_type	uart_type;
@@ -161,19 +162,21 @@ static int get_console_state(struct uart_port *port);
 static inline int get_console_state(struct uart_port *port) { return -ENODEV; };
 #endif
 
+static bool msm_console_disabled = false;
+
 static struct dentry *debug_base;
 static inline void wait_for_xmitr(struct uart_port *port);
 static inline void msm_hsl_write(struct uart_port *port,
 				 unsigned int val, unsigned int off)
 {
 	__iowmb();
-	__raw_writel((__force __u32)cpu_to_le32(val),
+	__raw_writel_no_log((__force __u32)cpu_to_le32(val),
 		port->membase + off);
 }
 static inline unsigned int msm_hsl_read(struct uart_port *port,
 		     unsigned int off)
 {
-	unsigned int v = le32_to_cpu((__force __le32)__raw_readl(
+	unsigned int v = le32_to_cpu((__force __le32)__raw_readl_no_log(
 		port->membase + off));
 	__iormb();
 	return v;
@@ -182,6 +185,16 @@ static inline unsigned int msm_hsl_read(struct uart_port *port,
 static unsigned int msm_serial_hsl_has_gsbi(struct uart_port *port)
 {
 	return (UART_TO_MSM(port)->uart_type == GSBI_HSUART);
+}
+
+void msm_console_set_enable(bool enable)
+{
+	msm_console_disabled = !enable;
+}
+
+static bool console_disabled(void)
+{
+	return msm_console_disabled;
 }
 
 /**
@@ -525,6 +538,10 @@ static void msm_hsl_start_tx(struct uart_port *port)
 		pr_err("%s: System is in Suspend state\n", __func__);
 		return;
 	}
+
+	if (is_console(port) && console_disabled())
+		return;
+
 	msm_hsl_port->imr |= UARTDM_ISR_TXLEV_BMSK;
 	msm_hsl_write(port, msm_hsl_port->imr,
 		regmap[msm_hsl_port->ver_id][UARTDM_IMR]);
@@ -746,6 +763,9 @@ static unsigned int msm_hsl_tx_empty(struct uart_port *port)
 {
 	unsigned int ret;
 	unsigned int vid = UART_TO_MSM(port)->ver_id;
+
+	if (is_console(port) && console_disabled())
+		return 1;
 
 	ret = (msm_hsl_read(port, regmap[vid][UARTDM_SR]) &
 	       UARTDM_SR_TXEMT_BMSK) ? TIOCSER_TEMT : 0;
@@ -1449,6 +1469,9 @@ static void msm_hsl_console_write(struct console *co, const char *s,
 
 	BUG_ON(co->index < 0 || co->index >= UART_NR);
 
+	if (console_disabled())
+		return;
+
 	port = get_port_from_line(co->index);
 	msm_hsl_port = UART_TO_MSM(port);
 	vid = msm_hsl_port->ver_id;
@@ -1768,7 +1791,7 @@ static int msm_serial_hsl_probe(struct platform_device *pdev)
 	if (!match) {
 		msm_hsl_port->ver_id = UARTDM_VERSION_11_13;
 	} else {
-		msm_hsl_port->ver_id = (unsigned long)match->data;
+		msm_hsl_port->ver_id = (unsigned int)match->data;
 		/*
 		 * BLSP based UART configuration is available with
 		 * UARTDM v14 Revision. Hence set uart_type as UART_BLSP.

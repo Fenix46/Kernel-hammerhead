@@ -445,7 +445,7 @@ static int smd_tty_add_driver(struct smd_tty_info *info)
 
 	mutex_lock(&smd_tty_pfdriver_lock_lha1);
 	list_for_each_entry(item, &smd_tty_pfdriver_list, list) {
-		if (!strcmp(item->driver.driver.name, info->dev_name)) {
+		if (!strcmp(item->driver.driver.name, info->ch_name)) {
 			SMD_TTY_INFO("%s:%s Driver Already reg. cnt:%d\n",
 				__func__, info->ch_name, item->ref_cnt);
 			++item->ref_cnt;
@@ -492,7 +492,6 @@ exit:
 static void smd_tty_remove_driver(struct smd_tty_info *info)
 {
 	struct smd_tty_pfdriver *smd_tty_pfdriverp;
-	bool found_item = false;
 
 	if (!info) {
 		pr_err("%s on a NULL device\n", __func__);
@@ -504,8 +503,7 @@ static void smd_tty_remove_driver(struct smd_tty_info *info)
 	mutex_lock(&smd_tty_pfdriver_lock_lha1);
 	list_for_each_entry(smd_tty_pfdriverp, &smd_tty_pfdriver_list, list) {
 		if (!strcmp(smd_tty_pfdriverp->driver.driver.name,
-					info->dev_name)) {
-			found_item = true;
+					info->ch_name)) {
 			SMD_TTY_INFO("%s:%s Platform driver cnt:%d\n",
 				__func__, info->ch_name,
 				smd_tty_pfdriverp->ref_cnt);
@@ -516,11 +514,8 @@ static void smd_tty_remove_driver(struct smd_tty_info *info)
 			break;
 		}
 	}
-	if (!found_item)
-		SMD_TTY_ERR("%s:%s No item found in list.\n",
-			__func__, info->ch_name);
 
-	if (found_item && smd_tty_pfdriverp->ref_cnt == 0) {
+	if (smd_tty_pfdriverp->ref_cnt == 0) {
 		platform_driver_unregister(&smd_tty_pfdriverp->driver);
 		smd_tty_pfdriverp->driver.probe = NULL;
 		list_del(&smd_tty_pfdriverp->list);
