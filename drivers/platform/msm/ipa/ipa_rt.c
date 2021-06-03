@@ -752,7 +752,7 @@ static int __ipa_del_rt_tbl(struct ipa_rt_tbl *entry)
 		return -EINVAL;
 	}
 	id = entry->id;
-	if (ipa_id_find(id) == NULL) {
+	if (ipa_id_find(id)) {
 		IPAERR("lookup failed\n");
 		return -EPERM;
 	}

@@ -12,7 +12,7 @@
 
 #include "ipa_i.h"
 
-static const u32 ipa_hdr_bin_sz[IPA_HDR_BIN_MAX] = { 8, 16, 24, 36, 60};
+static const u32 ipa_hdr_bin_sz[IPA_HDR_BIN_MAX] = { 8, 16, 24, 36, 58};
 
 /**
  * ipa_generate_hdr_hw_tbl() - generates the headers table
@@ -200,12 +200,10 @@ int __ipa_commit_hdr_v2(void)
 		dma_free_coherent(ipa_ctx->pdev, mem.size, mem.base,
 				mem.phys_base);
 	} else {
-		if (!rc) {
-			if (ipa_ctx->hdr_mem.phys_base)
-				dma_free_coherent(ipa_ctx->pdev,
-						ipa_ctx->hdr_mem.size,
-						ipa_ctx->hdr_mem.base,
-						ipa_ctx->hdr_mem.phys_base);
+		if (!rc && ipa_ctx->hdr_mem.phys_base) {
+			dma_free_coherent(ipa_ctx->pdev, ipa_ctx->hdr_mem.size,
+					  ipa_ctx->hdr_mem.base,
+					  ipa_ctx->hdr_mem.phys_base);
 			ipa_ctx->hdr_mem = mem;
 		}
 	}
@@ -494,8 +492,9 @@ int ipa_reset_hdr(void)
 	list_for_each_entry_safe(entry, next,
 			&ipa_ctx->hdr_tbl.head_hdr_entry_list, link) {
 
-		/* do not remove the default header */
-		if (!strcmp(entry->name, IPA_LAN_RX_HDR_NAME))
+		/* do not remove the default exception header */
+		if (!strncmp(entry->name, IPA_A5_MUX_HDR_NAME,
+					IPA_RESOURCE_NAME_MAX))
 			continue;
 
 		if (ipa_id_find(entry->id) == NULL) {

@@ -13,6 +13,7 @@
 #include <linux/slab.h>
 #include "ipa_i.h"
 #include "ipa_rm_i.h"
+#include "ipa_rm_resource.h"
 
 /**
  * ipa_rm_peers_list_get_resource_index() - resource name to index
@@ -60,7 +61,7 @@ int ipa_rm_peers_list_create(int max_peers,
 {
 	int result;
 
-	*peers_list = kzalloc(sizeof(**peers_list), GFP_ATOMIC);
+	*peers_list = kzalloc(sizeof(**peers_list), GFP_KERNEL);
 	if (!*peers_list) {
 		IPA_RM_ERR("no mem\n");
 		result = -ENOMEM;
@@ -69,7 +70,7 @@ int ipa_rm_peers_list_create(int max_peers,
 
 	(*peers_list)->max_peers = max_peers;
 	(*peers_list)->peers = kzalloc((*peers_list)->max_peers *
-				sizeof(struct ipa_rm_resource *), GFP_ATOMIC);
+				sizeof(struct ipa_rm_resource *), GFP_KERNEL);
 	if (!((*peers_list)->peers)) {
 		IPA_RM_ERR("no mem\n");
 		result = -ENOMEM;

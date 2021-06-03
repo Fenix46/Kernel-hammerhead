@@ -56,6 +56,8 @@ const char *ipa_event_name[] = {
 	__stringify(WLAN_STA_CONNECT),
 	__stringify(WLAN_STA_DISCONNECT),
 	__stringify(WLAN_CLIENT_CONNECT_EX),
+	__stringify(WAN_UPSTREAM_ROUTE_ADD),
+	__stringify(WAN_UPSTREAM_ROUTE_DEL),
 	__stringify(ECM_CONNECT),
 	__stringify(ECM_DISCONNECT),
 };
@@ -624,6 +626,7 @@ static ssize_t ipa_read_flt(struct file *file, char __user *ubuf, size_t count,
 {
 	int i;
 	int j;
+	int k;
 	struct ipa_flt_tbl *tbl;
 	struct ipa_flt_entry *entry;
 	enum ipa_ip_type ip = (enum ipa_ip_type)file->private_data;
@@ -680,6 +683,7 @@ static ssize_t ipa_read_flt(struct file *file, char __user *ubuf, size_t count,
 				bitmap = entry->rule.attrib.attrib_mask;
 				eq = false;
 			}
+			k = ipa_get_client_mapping(j);
 			pr_info(
 				"ep_idx:%d rule_idx:%d act:%d rt_tbl_idx:%d "
 				"attrib_mask:%08x to_uc:%d, retain_hdr:%d eq:%d ",
@@ -720,7 +724,6 @@ static ssize_t ipa_read_stats(struct file *file, char __user *ubuf,
 			"stat_compl=%u\n"
 			"lan_aggr_close=%u\n"
 			"wan_aggr_close=%u\n"
-			"act_clnt=%u\n"
 			"con_clnt_bmap=0x%x\n",
 			ipa_ctx->stats.tx_sw_pkts,
 			ipa_ctx->stats.tx_hw_pkts,
@@ -729,7 +732,6 @@ static ssize_t ipa_read_stats(struct file *file, char __user *ubuf,
 			ipa_ctx->stats.stat_compl,
 			ipa_ctx->stats.aggr_close,
 			ipa_ctx->stats.wan_aggr_close,
-			ipa_ctx->ipa_active_clients.cnt,
 			connect);
 		cnt += nbytes;
 
@@ -749,14 +751,26 @@ static ssize_t ipa_read_stats(struct file *file, char __user *ubuf,
 			"rx_repl_repost=%u\n"
 			"rx_q_len=%u\n"
 			"act_clnt=%u\n"
-			"con_clnt_bmap=0x%x\n",
+			"con_clnt_bmap=0x%x\n"
+			"a2_power_on_reqs_in=%u\n"
+			"a2_power_on_reqs_out=%u\n"
+			"a2_power_off_reqs_in=%u\n"
+			"a2_power_off_reqs_out=%u\n"
+			"a2_power_modem_acks=%u\n"
+			"a2_power_apps_acks=%u\n",
 			ipa_ctx->stats.tx_sw_pkts,
 			ipa_ctx->stats.tx_hw_pkts,
 			ipa_ctx->stats.rx_pkts,
 			ipa_ctx->stats.rx_repl_repost,
 			ipa_ctx->stats.rx_q_len,
-			ipa_ctx->ipa_active_clients.cnt,
-			connect);
+			ipa_ctx->ipa_active_clients,
+			connect,
+			ipa_ctx->stats.a2_power_on_reqs_in,
+			ipa_ctx->stats.a2_power_on_reqs_out,
+			ipa_ctx->stats.a2_power_off_reqs_in,
+			ipa_ctx->stats.a2_power_off_reqs_out,
+			ipa_ctx->stats.a2_power_modem_acks,
+			ipa_ctx->stats.a2_power_apps_acks);
 	cnt += nbytes;
 
 		for (i = 0; i < MAX_NUM_EXCP; i++) {
@@ -823,10 +837,6 @@ static ssize_t ipa_read_wstats(struct file *file, char __user *ubuf,
 
 	nbytes = scnprintf(dbg_buff + cnt, IPA_MAX_MSG_LEN - cnt, FRMT_STR,
 		"Tx Pkts Freed:", ipa_ctx->wstats.tx_pkts_freed);
-	cnt += nbytes;
-
-	nbytes = scnprintf(dbg_buff + cnt, IPA_MAX_MSG_LEN - cnt, FRMT_STR,
-		"Tx Pkts Dropped:", ipa_ctx->wstats.tx_pkts_dropped);
 	cnt += nbytes;
 
 	nbytes = scnprintf(dbg_buff + cnt, IPA_MAX_MSG_LEN - cnt, FRMT_STR,
@@ -1286,21 +1296,6 @@ void ipa_debugfs_init(void)
 			read_only_mode, dent, 0, &ipa_rm_stats);
 	if (!dfile_rm_stats || IS_ERR(dfile_rm_stats)) {
 		IPAERR("fail to create file for debug_fs rm_stats\n");
-		goto fail;
-	}
-
-	file = debugfs_create_u32("enable_clock_scaling", read_write_mode,
-		dent, &ipa_ctx->enable_clock_scaling);
-	if (!file) {
-		IPAERR("could not create enable_clock_scaling file\n");
-		goto fail;
-	}
-
-	file = debugfs_create_u32("clock_scaling_bw_threshold_mbps",
-		read_write_mode, dent,
-		&ipa_ctx->ctrl->clock_scaling_bw_threshold);
-	if (!file) {
-		IPAERR("could not create clock_scaling_bw_threshold_mbps\n");
 		goto fail;
 	}
 
