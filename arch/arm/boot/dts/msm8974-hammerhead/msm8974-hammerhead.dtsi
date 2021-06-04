@@ -149,6 +149,10 @@
 		interrupts = <42 0>;
 		interrupt-names = "host_wake";
 	};
+	
+	qcom,bam_dmux@fc834000 {
+		qcom,fast-shutdown;
+	};
 };
 
 &spmi_bus {
@@ -376,10 +380,6 @@
 
 &usb_otg {
 	qcom,hsusb-otg-otg-control = <2>;
-};
-
-&usb3 {
-	qcom,otg-capability;
 };
 
 &pm8941_bms {
