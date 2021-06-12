@@ -15,7 +15,7 @@
 #include <linux/memory_alloc.h>
 #include <linux/slab.h>
 #include <linux/types.h>
-#include <mach/scm.h>
+#include <soc/qcom/scm.h>
 #include <linux/highmem.h>
 
 #include "../ion_priv.h"
