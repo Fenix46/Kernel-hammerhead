@@ -21,8 +21,8 @@
 #include <linux/mpu.h>
 #include <linux/wakelock.h>
 
-#include "iio.h"
-#include "buffer.h"
+#include <linux/iio/iio.h>
+#include <linux/iio/buffer.h>
 
 #include "dmpKey.h"
 
