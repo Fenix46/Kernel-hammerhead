@@ -270,7 +270,7 @@ static void sdhci_reset(struct sdhci_host *host, u8 mask)
 		host->clock = 0;
 
 	/* Wait max 100 ms */
-	timeout = 100;
+	timeout = 100000;
 
 	if (host->ops->check_power_status && host->pwr &&
 	    (mask & SDHCI_RESET_ALL))
@@ -285,15 +285,11 @@ static void sdhci_reset(struct sdhci_host *host, u8 mask)
 			return;
 		}
 		timeout--;
-		mdelay(1);
+		udelay(1);
 	}
 
 	if (host->ops->platform_reset_exit)
 		host->ops->platform_reset_exit(host, mask);
-
-	/* clear pending normal/error interrupt status */
-	sdhci_writel(host, sdhci_readl(host, SDHCI_INT_STATUS),
-			SDHCI_INT_STATUS);
 
 	if (host->quirks & SDHCI_QUIRK_RESTORE_IRQS_AFTER_RESET)
 		sdhci_clear_set_irqs(host, SDHCI_INT_ALL_MASK, ier);
@@ -1159,7 +1155,7 @@ static void sdhci_send_command(struct sdhci_host *host, struct mmc_command *cmd)
 	WARN_ON(host->cmd);
 
 	/* Wait max 10 ms */
-	timeout = 10;
+	timeout = 10000;
 
 	mask = SDHCI_CMD_INHIBIT;
 	if ((cmd->data != NULL) || (cmd->flags & MMC_RSP_BUSY))
@@ -1180,7 +1176,7 @@ static void sdhci_send_command(struct sdhci_host *host, struct mmc_command *cmd)
 			return;
 		}
 		timeout--;
-		mdelay(1);
+		udelay(1);
 	}
 
 	mod_timer(&host->timer, jiffies + SDHCI_REQUEST_TIMEOUT * HZ);
@@ -1252,10 +1248,9 @@ static void sdhci_finish_command(struct sdhci_host *host)
 		}
 	}
 
-	host->cmd->error = 0;
-
 	/* Finished CMD23, now send actual command. */
 	if (host->cmd == host->mrq->sbc) {
+		host->cmd->error = 0;
 		host->cmd = NULL;
 		sdhci_send_command(host, host->mrq->cmd);
 	} else {
@@ -1406,7 +1401,7 @@ clock_set:
 	sdhci_writew(host, clk, SDHCI_CLOCK_CONTROL);
 
 	/* Wait max 20 ms */
-	timeout = 20;
+	timeout = 20000;
 	while (!((clk = sdhci_readw(host, SDHCI_CLOCK_CONTROL))
 		& SDHCI_CLOCK_INT_STABLE)) {
 		if (timeout == 0) {
@@ -1416,7 +1411,7 @@ clock_set:
 			goto ret;
 		}
 		timeout--;
-		mdelay(1);
+		udelay(1);
 	}
 
 	clk |= SDHCI_CLOCK_CARD_EN;
@@ -1668,8 +1663,7 @@ static void sdhci_request(struct mmc_host *mmc, struct mmc_request *mrq)
 		mrq->cmd->error = -EIO;
 		if (mrq->data)
 			mrq->data->error = -EIO;
-		mmc_request_done(host->mmc, mrq);
-		sdhci_runtime_pm_put(host);
+		tasklet_schedule(&host->finish_tasklet);
 		return;
 	}
 
@@ -2542,6 +2536,9 @@ static void sdhci_card_event(struct mmc_host *mmc)
 	struct sdhci_host *host = mmc_priv(mmc);
 	unsigned long flags;
 
+	if (host->quirks & SDHCI_QUIRK_BROKEN_CARD_DETECTION)
+		return;
+
 	spin_lock_irqsave(&host->lock, flags);
 
 	/* Check host->mrq first in case we are runtime suspended */
@@ -2801,6 +2798,17 @@ static void sdhci_cmd_irq(struct sdhci_host *host, u32 intmask)
 			host->cmd->error = -EILSEQ;
 	}
 
+	if (host->quirks2 & SDHCI_QUIRK2_IGNORE_CMDCRC_FOR_TUNING) {
+		if ((host->cmd->opcode == MMC_SEND_TUNING_BLOCK_HS400) ||
+			(host->cmd->opcode == MMC_SEND_TUNING_BLOCK_HS200) ||
+			(host->cmd->opcode == MMC_SEND_TUNING_BLOCK)) {
+			if (intmask & SDHCI_INT_CRC) {
+				sdhci_reset(host, SDHCI_RESET_CMD);
+				host->cmd->error = 0;
+			}
+		}
+	}
+
 	if (host->cmd->error) {
 		if (host->cmd->error == -EILSEQ)
 			host->flags |= SDHCI_NEEDS_RETUNING;
@@ -2828,6 +2836,17 @@ static void sdhci_cmd_irq(struct sdhci_host *host, u32 intmask)
 
 		/* The controller does not support the end-of-busy IRQ,
 		 * fall through and take the SDHCI_INT_RESPONSE */
+	}
+
+	if (host->quirks2 & SDHCI_QUIRK2_IGNORE_CMDCRC_FOR_TUNING) {
+		if ((host->cmd->opcode == MMC_SEND_TUNING_BLOCK_HS400) ||
+			(host->cmd->opcode == MMC_SEND_TUNING_BLOCK_HS200) ||
+			(host->cmd->opcode == MMC_SEND_TUNING_BLOCK)) {
+			if (intmask & SDHCI_INT_CRC) {
+				sdhci_finish_command(host);
+				return;
+			}
+		}
 	}
 
 	if (intmask & SDHCI_INT_RESPONSE)
@@ -2924,7 +2943,8 @@ static void sdhci_data_irq(struct sdhci_host *host, u32 intmask)
 			host->ops->adma_workaround(host, intmask);
 	}
 	if (host->data->error) {
-		if (intmask & (SDHCI_INT_DATA_CRC | SDHCI_INT_DATA_TIMEOUT)) {
+		if ((intmask & (SDHCI_INT_DATA_CRC | SDHCI_INT_DATA_TIMEOUT)) &&
+		    (host->quirks2 & SDHCI_QUIRK2_IGNORE_CMDCRC_FOR_TUNING)) {
 			command = SDHCI_GET_CMD(sdhci_readw(host,
 							    SDHCI_COMMAND));
 			if ((command != MMC_SEND_TUNING_BLOCK_HS400) &&
@@ -3810,14 +3830,14 @@ int sdhci_add_host(struct sdhci_host *host)
 	else if (host->flags & SDHCI_USE_SDMA)
 		mmc->max_segs = 1;
 	else/* PIO */
-		mmc->max_segs = 128;
+		mmc->max_segs = host->adma_max_desc;
 
 	/*
 	 * Maximum number of sectors in one transfer. Limited by DMA boundary
 	 * size (512KiB), unless specified by platform specific driver. Each
 	 * descriptor can transfer a maximum of 64KB.
 	 */
-	if (host->flags & SDHCI_USE_ADMA)
+	if (host->ops->get_max_segments)
 		mmc->max_req_size = (host->adma_max_desc * 65536);
 	else
 		mmc->max_req_size = 524288;

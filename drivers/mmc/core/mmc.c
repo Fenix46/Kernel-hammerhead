@@ -319,13 +319,12 @@ static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
 		}
 	}
 
+	/*
+	 * The EXT_CSD format is meant to be forward compatible. As long
+	 * as CSD_STRUCTURE does not change, all values for EXT_CSD_REV
+	 * are authorized, see JEDEC JESD84-B50 section B.8.
+	 */
 	card->ext_csd.rev = ext_csd[EXT_CSD_REV];
-	if (card->ext_csd.rev > 7) {
-		pr_err("%s: unrecognised EXT_CSD revision %d\n",
-			mmc_hostname(card->host), card->ext_csd.rev);
-		err = -EINVAL;
-		goto out;
-	}
 
 	/* fixup device after ext_csd revision field is updated */
 	mmc_fixup_device(card, mmc_fixups);
@@ -348,8 +347,6 @@ static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
 
 	card->ext_csd.raw_card_type = ext_csd[EXT_CSD_CARD_TYPE];
 	mmc_select_card_type(card);
-
-	card->ext_csd.raw_drive_strength = ext_csd[EXT_CSD_DRIVE_STRENGTH];
 
 	card->ext_csd.raw_s_a_timeout = ext_csd[EXT_CSD_S_A_TIMEOUT];
 	card->ext_csd.raw_erase_timeout_mult =
@@ -1135,12 +1132,7 @@ static int mmc_select_hs400(struct mmc_card *card, u8 *ext_csd)
 	mmc_set_timing(host, MMC_TIMING_LEGACY);
 	mmc_set_clock(host, MMC_HIGH_26_MAX_DTR);
 
-	err = mmc_select_hs(card, ext_csd);
-	if (err)
-		goto out;
-	mmc_card_clr_highspeed(card);
-
-	/* Switch to 8-bit DDR mode */
+	/* Switch to 8-bit HighSpeed DDR mode */
 	err = mmc_select_hsddr(card, ext_csd);
 	if (err)
 		goto out;
@@ -1401,7 +1393,6 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 		card->rca = 1;
 		memcpy(card->raw_cid, cid, sizeof(card->raw_cid));
 		card->reboot_notify.notifier_call = mmc_reboot_notify;
-		host->card = card;
 	}
 
 	/*
@@ -1647,10 +1638,12 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 		}
 	}
 
+	if (!oldcard)
+		host->card = card;
+
 	return 0;
 
 free_card:
-	host->card = NULL;
 	if (!oldcard)
 		mmc_remove_card(card);
 err:
